@@ -2,7 +2,7 @@
 
 [![crate](https://img.shields.io/crates/v/tmux-lib.svg)](https://crates.io/crates/tmux-lib)
 [![documentation](https://docs.rs/tmux-lib/badge.svg)](https://docs.rs/tmux-lib)
-[![minimum rustc 1.8](https://img.shields.io/badge/rustc-1.50+-red.svg)](https://rust-lang.github.io/rfcs/2495-min-rust-version.html)
+[![minimum rustc 1.8](https://img.shields.io/badge/rustc-1.59+-red.svg)](https://rust-lang.github.io/rfcs/2495-min-rust-version.html)
 [![build status](https://github.com/graelo/tmux-lib/actions/workflows/essentials.yml/badge.svg)](https://github.com/graelo/tmux-lib/actions)
 
 <!-- cargo-sync-readme start -->
