@@ -65,9 +65,10 @@ pub async fn show_options(global: bool) -> Result<HashMap<String, String>> {
     let pairs: HashMap<String, String> = buffer
         .trim_end()
         .split('\n')
-        .into_iter()
         .map(|s| s.split_at(s.find(' ').unwrap()))
-        .map(|(k, v)| (k.to_string(), v[1..].to_string()))
+        .map(|(k, v)| (k, v.trim_start()))
+        .filter(|(_, v)| !v.is_empty() && v != &"''")
+        .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
 
     Ok(pairs)
@@ -93,6 +94,13 @@ pub async fn default_command() -> Result<String> {
 
     all_options
         .get("default-command")
+        // .map(|cmd| {
+        //     if cmd.trim_end() == "''" {
+        //         &default_shell
+        //     } else {
+        //         cmd
+        //     }
+        // })
         .or(Some(&default_shell))
         .ok_or(Error::TmuxConfig("no default-command nor default-shell"))
         .map(|cmd| cmd.to_owned())
