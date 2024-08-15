@@ -1,10 +1,10 @@
 //! Read or manipulate Tmux.
 //!
-//! Version requirement: _rustc 1.59.0+_
+//! Version requirement: _rustc 1.74.0+_
 //!
 //! ```toml
 //! [dependencies]
-//! tmux-lib = "0.2"
+//! tmux-lib = "0.3"
 //! ```
 //!
 //! ## Getting started

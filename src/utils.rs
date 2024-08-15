@@ -1,6 +1,6 @@
 /// Misc utilities.
 
-pub(crate) trait SliceExt {
+pub trait SliceExt {
     fn trim(&self) -> &Self;
     fn trim_trailing(&self) -> &Self;
 }
