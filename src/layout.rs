@@ -35,8 +35,7 @@ impl WindowLayout {
     /// Return a flat list of pane ids.
     #[must_use]
     pub fn pane_ids(&self) -> Vec<u16> {
-        let mut acc: Vec<u16> = vec![];
-        acc.reserve(1);
+        let mut acc: Vec<u16> = Vec::with_capacity(1);
         self.walk(&mut acc);
         acc
     }
