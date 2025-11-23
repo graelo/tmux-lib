@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::{check_empty_process_output, map_add_intent, Error},
     pane_id::{parse::pane_id, PaneId},
-    parse::{boolean, quoted_nonempty_string},
+    parse::{boolean, quoted_nonempty_string, quoted_string},
     window_id::WindowId,
     Result,
 };
@@ -115,7 +115,7 @@ pub(crate) mod parse {
                 char(':'),
                 boolean,
                 char(':'),
-                quoted_nonempty_string,
+                quoted_string,
                 char(':'),
                 quoted_nonempty_string,
                 char(':'),
@@ -251,5 +251,22 @@ mod tests {
         ];
 
         assert_eq!(panes, expected);
+    }
+
+    #[test]
+    fn parse_pane_with_empty_title() {
+        let line = "%20:0:false:'':'nvim':/Users/graelo/code/rust/tmux-backup";
+        let pane = Pane::from_str(line).expect("Could not parse pane with empty title");
+
+        let expected = Pane {
+            id: PaneId::from_str("%20").unwrap(),
+            index: 0,
+            is_active: false,
+            title: String::from(""),
+            dirpath: PathBuf::from_str("/Users/graelo/code/rust/tmux-backup").unwrap(),
+            command: String::from("nvim"),
+        };
+
+        assert_eq!(pane, expected);
     }
 }
