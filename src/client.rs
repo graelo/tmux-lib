@@ -48,8 +48,9 @@ impl FromStr for Client {
         let intent = "'#{client_session}':'#{client_last_session}'";
         let parser = (quoted_nonempty_string, char(':'), quoted_string);
 
-        let (_, (session_name, _, last_session_name)) =
-            all_consuming(parser).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        let (_, (session_name, _, last_session_name)) = all_consuming(parser)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(Client {
             session_name: session_name.to_string(),

@@ -77,8 +77,9 @@ impl FromStr for Window {
         let desc = "Window";
         let intent = "#{window_id}:#{window_index}:#{?window_active,true,false}:#{window_layout}:'#{window_name}':'#{window_linked_sessions_list}'";
 
-        let (_, window) =
-            all_consuming(parse::window).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        let (_, window) = all_consuming(parse::window)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(window)
     }
@@ -96,20 +97,20 @@ pub(crate) mod parse {
     use super::*;
 
     pub(crate) fn window(input: &str) -> IResult<&str, Window> {
-        let (input, (id, _, index, _, is_active, _, layout, _, name, _, session_names)) =
-            (
-                window_id,
-                char(':'),
-                map_res(digit1, str::parse),
-                char(':'),
-                boolean,
-                char(':'),
-                recognize(window_layout),
-                char(':'),
-                quoted_nonempty_string,
-                char(':'),
-                quoted_nonempty_string,
-            ).parse(input)?;
+        let (input, (id, _, index, _, is_active, _, layout, _, name, _, session_names)) = (
+            window_id,
+            char(':'),
+            map_res(digit1, str::parse),
+            char(':'),
+            boolean,
+            char(':'),
+            recognize(window_layout),
+            char(':'),
+            quoted_nonempty_string,
+            char(':'),
+            quoted_nonempty_string,
+        )
+            .parse(input)?;
 
         Ok((
             input,
@@ -198,9 +199,9 @@ pub async fn new_window(
     let desc = "new-window";
     let intent = "#{window_id}:#{pane_id}";
 
-    let (_, (new_window_id, _, new_pane_id)) =
-        all_consuming((window_id, char(':'), pane_id)).parse(buffer)
-            .map_err(|e| map_add_intent(desc, intent, e))?;
+    let (_, (new_window_id, _, new_pane_id)) = all_consuming((window_id, char(':'), pane_id))
+        .parse(buffer)
+        .map_err(|e| map_add_intent(desc, intent, e))?;
 
     Ok((new_window_id, new_pane_id))
 }

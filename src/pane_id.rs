@@ -27,8 +27,9 @@ impl FromStr for PaneId {
         let desc = "PaneId";
         let intent = "#{pane_id}";
 
-        let (_, pane_id) =
-            all_consuming(parse::pane_id).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        let (_, pane_id) = all_consuming(parse::pane_id)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(pane_id)
     }

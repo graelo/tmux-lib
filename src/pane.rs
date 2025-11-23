@@ -67,8 +67,9 @@ impl FromStr for Pane {
         let desc = "Pane";
         let intent = "#{pane_id}:#{pane_index}:#{?pane_active,true,false}:'#{pane_title}':'#{pane_current_command}':#{pane_current_path}";
 
-        let (_, pane) =
-            all_consuming(parse::pane).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        let (_, pane) = all_consuming(parse::pane)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(pane)
     }
@@ -106,20 +107,20 @@ pub(crate) mod parse {
     use super::*;
 
     pub(crate) fn pane(input: &str) -> IResult<&str, Pane> {
-        let (input, (id, _, index, _, is_active, _, title, _, command, _, dirpath)) =
-            (
-                pane_id,
-                char(':'),
-                map_res(digit1, str::parse),
-                char(':'),
-                boolean,
-                char(':'),
-                quoted_string,
-                char(':'),
-                quoted_nonempty_string,
-                char(':'),
-                not_line_ending,
-            ).parse(input)?;
+        let (input, (id, _, index, _, is_active, _, title, _, command, _, dirpath)) = (
+            pane_id,
+            char(':'),
+            map_res(digit1, str::parse),
+            char(':'),
+            boolean,
+            char(':'),
+            quoted_string,
+            char(':'),
+            quoted_nonempty_string,
+            char(':'),
+            not_line_ending,
+        )
+            .parse(input)?;
 
         Ok((
             input,

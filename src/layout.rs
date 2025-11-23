@@ -121,8 +121,9 @@ impl Split {
 pub fn parse_window_layout(input: &str) -> Result<WindowLayout> {
     let desc = "window-layout";
     let intent = "window-layout";
-    let (_, win_layout) =
-        all_consuming(window_layout).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
+    let (_, win_layout) = all_consuming(window_layout)
+        .parse(input)
+        .map_err(|e| map_add_intent(desc, intent, e))?;
 
     Ok(win_layout)
 }

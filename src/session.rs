@@ -64,8 +64,9 @@ impl FromStr for Session {
         let desc = "Session";
         let intent = "#{session_id}:'#{session_name}':#{session_path}";
 
-        let (_, sess) =
-            all_consuming(parse::session).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        let (_, sess) = all_consuming(parse::session)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(sess)
     }
@@ -81,7 +82,8 @@ pub(crate) mod parse {
             quoted_nonempty_string,
             char(':'),
             not_line_ending,
-        ).parse(input)?;
+        )
+            .parse(input)?;
 
         Ok((
             input,
@@ -156,14 +158,10 @@ pub async fn new_session(
 
     let desc = "new-session";
     let intent = "#{session_id}:#{window_id}:#{pane_id}";
-    let (_, (new_session_id, _, new_window_id, _, new_pane_id)) = all_consuming((
-        session_id,
-        char(':'),
-        window_id,
-        char(':'),
-        pane_id,
-    )).parse(buffer)
-    .map_err(|e| map_add_intent(desc, intent, e))?;
+    let (_, (new_session_id, _, new_window_id, _, new_pane_id)) =
+        all_consuming((session_id, char(':'), window_id, char(':'), pane_id))
+            .parse(buffer)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
     Ok((new_session_id, new_window_id, new_pane_id))
 }

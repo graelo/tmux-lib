@@ -27,8 +27,9 @@ impl FromStr for SessionId {
         let desc = "SessionId";
         let intent = "#{session_id}";
 
-        let (_, sess_id) =
-            all_consuming(parse::session_id).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        let (_, sess_id) = all_consuming(parse::session_id)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(sess_id)
     }
