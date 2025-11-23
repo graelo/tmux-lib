@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn parse_list_sessions() {
-        let output = vec![
+        let output = [
             "$1:'pytorch':/Users/graelo/ml/pytorch",
             "$2:'rust':/Users/graelo/rust",
             "$3:'server: $':/Users/graelo/swift",

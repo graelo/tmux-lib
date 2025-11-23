@@ -96,7 +96,6 @@ pub fn display_message(message: &str) {
 }
 
 /// Switch to session exactly named `session_name`.
-
 pub async fn switch_client(session_name: &str) -> Result<()> {
     let exact_session_name = format!("={session_name}");
     let args = vec!["switch-client", "-t", &exact_session_name];

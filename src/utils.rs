@@ -1,5 +1,4 @@
 /// Misc utilities.
-
 pub trait SliceExt {
     fn trim(&self) -> &Self;
     fn trim_trailing(&self) -> &Self;

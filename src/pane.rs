@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn parse_list_panes() {
-        let output = vec![
+        let output = [
             "%20:0:false:'rmbp':'nvim':/Users/graelo/code/rust/tmux-backup",
             "%21:1:true:'graelo@server: ~':'tmux':/Users/graelo/code/rust/tmux-backup",
             "%27:2:false:'rmbp':'man man':/Users/graelo/code/rust/tmux-backup",
