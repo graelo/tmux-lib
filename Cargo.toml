@@ -17,9 +17,9 @@ categories = ["command-line-utilities"]
 exclude = ["/.github", "/ci", "/.travis.yml", "/appveyor.yml"]
 
 [dependencies]
-thiserror = "1"
+thiserror = "2"
 
 serde = { version = "1.0", features = ["derive"] }
-nom = "7"
+nom = "8"
 
 async-std = { version = "1", features = ["unstable"] }

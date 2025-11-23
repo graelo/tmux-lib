@@ -16,8 +16,8 @@ use nom::{
     character::complete::{char, digit1, hex_digit1},
     combinator::{all_consuming, map_res},
     multi::separated_list1,
-    sequence::{delimited, tuple},
-    IResult,
+    sequence::delimited,
+    IResult, Parser,
 };
 
 use crate::{error::map_add_intent, Result};
@@ -122,13 +122,13 @@ pub fn parse_window_layout(input: &str) -> Result<WindowLayout> {
     let desc = "window-layout";
     let intent = "window-layout";
     let (_, win_layout) =
-        all_consuming(window_layout)(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        all_consuming(window_layout).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
 
     Ok(win_layout)
 }
 
 pub(crate) fn window_layout(input: &str) -> IResult<&str, WindowLayout> {
-    let (input, (id, _, container)) = tuple((layout_id, char(','), container))(input)?;
+    let (input, (id, _, container)) = (layout_id, char(','), container).parse(input)?;
     Ok((input, WindowLayout { id, container }))
 }
 
@@ -137,47 +137,47 @@ fn from_hex(input: &str) -> std::result::Result<u16, std::num::ParseIntError> {
 }
 
 fn layout_id(input: &str) -> IResult<&str, u16> {
-    map_res(hex_digit1, from_hex)(input)
+    map_res(hex_digit1, from_hex).parse(input)
 }
 
 fn parse_u16(input: &str) -> IResult<&str, u16> {
-    map_res(digit1, str::parse)(input)
+    map_res(digit1, str::parse).parse(input)
 }
 
 fn dimensions(input: &str) -> IResult<&str, Dimensions> {
-    let (input, (width, _, height)) = tuple((parse_u16, char('x'), parse_u16))(input)?;
+    let (input, (width, _, height)) = (parse_u16, char('x'), parse_u16).parse(input)?;
     Ok((input, Dimensions { width, height }))
 }
 
 fn coordinates(input: &str) -> IResult<&str, Coordinates> {
-    let (input, (x, _, y)) = tuple((parse_u16, char(','), parse_u16))(input)?;
+    let (input, (x, _, y)) = (parse_u16, char(','), parse_u16).parse(input)?;
     Ok((input, Coordinates { x, y }))
 }
 
 fn single_pane(input: &str) -> IResult<&str, Element> {
-    let (input, (_, pane_id)) = tuple((char(','), parse_u16))(input)?;
+    let (input, (_, pane_id)) = (char(','), parse_u16).parse(input)?;
     Ok((input, Element::Pane { pane_id }))
 }
 
 fn horiz_split(input: &str) -> IResult<&str, Element> {
     let (input, elements) =
-        delimited(char('{'), separated_list1(char(','), container), char('}'))(input)?;
+        delimited(char('{'), separated_list1(char(','), container), char('}')).parse(input)?;
     Ok((input, Element::Horizontal(Split { elements })))
 }
 
 fn vert_split(input: &str) -> IResult<&str, Element> {
     let (input, elements) =
-        delimited(char('['), separated_list1(char(','), container), char(']'))(input)?;
+        delimited(char('['), separated_list1(char(','), container), char(']')).parse(input)?;
     Ok((input, Element::Vertical(Split { elements })))
 }
 
 fn element(input: &str) -> IResult<&str, Element> {
-    alt((single_pane, horiz_split, vert_split))(input)
+    alt((single_pane, horiz_split, vert_split)).parse(input)
 }
 
 fn container(input: &str) -> IResult<&str, Container> {
     let (input, (dimensions, _, coordinates, element)) =
-        tuple((dimensions, char(','), coordinates, element))(input)?;
+        (dimensions, char(','), coordinates, element).parse(input)?;
     Ok((
         input,
         Container {

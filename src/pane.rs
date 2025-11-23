@@ -10,8 +10,7 @@ use async_std::process::Command;
 use nom::{
     character::complete::{char, digit1, not_line_ending},
     combinator::{all_consuming, map_res},
-    sequence::tuple,
-    IResult,
+    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 
@@ -69,7 +68,7 @@ impl FromStr for Pane {
         let intent = "#{pane_id}:#{pane_index}:#{?pane_active,true,false}:'#{pane_title}':'#{pane_current_command}':#{pane_current_path}";
 
         let (_, pane) =
-            all_consuming(parse::pane)(input).map_err(|e| map_add_intent(desc, intent, e))?;
+            all_consuming(parse::pane).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(pane)
     }
@@ -108,7 +107,7 @@ pub(crate) mod parse {
 
     pub(crate) fn pane(input: &str) -> IResult<&str, Pane> {
         let (input, (id, _, index, _, is_active, _, title, _, command, _, dirpath)) =
-            tuple((
+            (
                 pane_id,
                 char(':'),
                 map_res(digit1, str::parse),
@@ -120,7 +119,7 @@ pub(crate) mod parse {
                 quoted_nonempty_string,
                 char(':'),
                 not_line_ending,
-            ))(input)?;
+            ).parse(input)?;
 
         Ok((
             input,

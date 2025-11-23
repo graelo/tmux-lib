@@ -3,7 +3,7 @@
 use std::str::FromStr;
 
 use async_std::process::Command;
-use nom::{character::complete::char, combinator::all_consuming, sequence::tuple};
+use nom::{character::complete::char, combinator::all_consuming, Parser};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -46,10 +46,10 @@ impl FromStr for Client {
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
         let desc = "Client";
         let intent = "'#{client_session}':'#{client_last_session}'";
-        let parser = tuple((quoted_nonempty_string, char(':'), quoted_string));
+        let parser = (quoted_nonempty_string, char(':'), quoted_string);
 
         let (_, (session_name, _, last_session_name)) =
-            all_consuming(parser)(input).map_err(|e| map_add_intent(desc, intent, e))?;
+            all_consuming(parser).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(Client {
             session_name: session_name.to_string(),

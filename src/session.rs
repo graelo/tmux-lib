@@ -9,8 +9,7 @@ use async_std::process::Command;
 use nom::{
     character::complete::{char, not_line_ending},
     combinator::all_consuming,
-    sequence::tuple,
-    IResult,
+    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 
@@ -66,7 +65,7 @@ impl FromStr for Session {
         let intent = "#{session_id}:'#{session_name}':#{session_path}";
 
         let (_, sess) =
-            all_consuming(parse::session)(input).map_err(|e| map_add_intent(desc, intent, e))?;
+            all_consuming(parse::session).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(sess)
     }
@@ -76,13 +75,13 @@ pub(crate) mod parse {
     use super::*;
 
     pub(crate) fn session(input: &str) -> IResult<&str, Session> {
-        let (input, (id, _, name, _, dirpath)) = tuple((
+        let (input, (id, _, name, _, dirpath)) = (
             session_id,
             char(':'),
             quoted_nonempty_string,
             char(':'),
             not_line_ending,
-        ))(input)?;
+        ).parse(input)?;
 
         Ok((
             input,
@@ -157,13 +156,13 @@ pub async fn new_session(
 
     let desc = "new-session";
     let intent = "#{session_id}:#{window_id}:#{pane_id}";
-    let (_, (new_session_id, _, new_window_id, _, new_pane_id)) = all_consuming(tuple((
+    let (_, (new_session_id, _, new_window_id, _, new_pane_id)) = all_consuming((
         session_id,
         char(':'),
         window_id,
         char(':'),
         pane_id,
-    )))(buffer)
+    )).parse(buffer)
     .map_err(|e| map_add_intent(desc, intent, e))?;
 
     Ok((new_session_id, new_window_id, new_pane_id))

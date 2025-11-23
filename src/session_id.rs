@@ -6,7 +6,7 @@ use nom::{
     character::complete::{char, digit1},
     combinator::all_consuming,
     sequence::preceded,
-    IResult,
+    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +28,7 @@ impl FromStr for SessionId {
         let intent = "#{session_id}";
 
         let (_, sess_id) =
-            all_consuming(parse::session_id)(input).map_err(|e| map_add_intent(desc, intent, e))?;
+            all_consuming(parse::session_id).parse(input).map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(sess_id)
     }
@@ -44,7 +44,7 @@ pub(crate) mod parse {
     use super::*;
 
     pub fn session_id(input: &str) -> IResult<&str, SessionId> {
-        let (input, digit) = preceded(char('$'), digit1)(input)?;
+        let (input, digit) = preceded(char('$'), digit1).parse(input)?;
         let id = format!("${digit}");
         Ok((input, SessionId(id)))
     }

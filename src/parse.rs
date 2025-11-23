@@ -4,7 +4,7 @@ use nom::{
     character::complete::none_of,
     combinator::value,
     sequence::delimited,
-    IResult,
+    IResult, Parser,
 };
 
 /// Return the `&str` between single quotes. The returned string may be empty.
@@ -13,13 +13,13 @@ pub(crate) fn quoted_string(input: &str) -> IResult<&str, &str> {
     let esc = escaped(none_of("\\\'"), '\\', tag("'"));
     let esc_or_empty = alt((esc, tag("")));
 
-    delimited(tag("'"), esc_or_empty, tag("'"))(input)
+    delimited(tag("'"), esc_or_empty, tag("'")).parse(input)
 }
 
 /// Return the `&str` between single quotes. The returned string may not be empty.
 pub(crate) fn quoted_nonempty_string(input: &str) -> IResult<&str, &str> {
     let esc = escaped(none_of("\\\'"), '\\', tag("'"));
-    delimited(tag("'"), esc, tag("'"))(input)
+    delimited(tag("'"), esc, tag("'")).parse(input)
 }
 
 /// Return a bool: allowed values: `"true"` or `"false"`.
@@ -30,7 +30,7 @@ pub(crate) fn boolean(input: &str) -> IResult<&str, bool> {
 
     let parse_false = value(false, tag("false"));
 
-    alt((parse_true, parse_false))(input)
+    alt((parse_true, parse_false)).parse(input)
 }
 
 #[cfg(test)]
