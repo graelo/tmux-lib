@@ -2,9 +2,9 @@
 
 use std::str::FromStr;
 
-use async_std::process::Command;
 use nom::{character::complete::char, combinator::all_consuming, Parser};
 use serde::{Deserialize, Serialize};
+use smol::process::Command;
 
 use crate::{
     error::{map_add_intent, Error},

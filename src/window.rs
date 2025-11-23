@@ -4,7 +4,7 @@
 
 use std::str::FromStr;
 
-use async_std::process::Command;
+use smol::process::Command;
 
 use nom::{
     character::complete::{char, digit1},

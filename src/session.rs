@@ -5,13 +5,13 @@
 
 use std::{path::PathBuf, str::FromStr};
 
-use async_std::process::Command;
 use nom::{
     character::complete::{char, not_line_ending},
     combinator::all_consuming,
     IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
+use smol::process::Command;
 
 use crate::{
     error::{map_add_intent, Error},

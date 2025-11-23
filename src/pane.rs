@@ -6,13 +6,13 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use async_std::process::Command;
 use nom::{
     character::complete::{char, digit1, not_line_ending},
     combinator::{all_consuming, map_res},
     IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
+use smol::process::Command;
 
 use crate::{
     error::{check_empty_process_output, map_add_intent, Error},

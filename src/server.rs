@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use async_std::process::Command;
+use smol::process::Command;
 
 use crate::{
     error::{check_empty_process_output, Error},
