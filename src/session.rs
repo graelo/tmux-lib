@@ -5,14 +5,13 @@
 
 use std::{path::PathBuf, str::FromStr};
 
-use async_std::process::Command;
 use nom::{
     character::complete::{char, not_line_ending},
     combinator::all_consuming,
-    sequence::tuple,
-    IResult,
+    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
+use smol::process::Command;
 
 use crate::{
     error::{map_add_intent, Error},
@@ -65,8 +64,9 @@ impl FromStr for Session {
         let desc = "Session";
         let intent = "#{session_id}:'#{session_name}':#{session_path}";
 
-        let (_, sess) =
-            all_consuming(parse::session)(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        let (_, sess) = all_consuming(parse::session)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(sess)
     }
@@ -76,13 +76,14 @@ pub(crate) mod parse {
     use super::*;
 
     pub(crate) fn session(input: &str) -> IResult<&str, Session> {
-        let (input, (id, _, name, _, dirpath)) = tuple((
+        let (input, (id, _, name, _, dirpath)) = (
             session_id,
             char(':'),
             quoted_nonempty_string,
             char(':'),
             not_line_ending,
-        ))(input)?;
+        )
+            .parse(input)?;
 
         Ok((
             input,
@@ -157,14 +158,10 @@ pub async fn new_session(
 
     let desc = "new-session";
     let intent = "#{session_id}:#{window_id}:#{pane_id}";
-    let (_, (new_session_id, _, new_window_id, _, new_pane_id)) = all_consuming(tuple((
-        session_id,
-        char(':'),
-        window_id,
-        char(':'),
-        pane_id,
-    )))(buffer)
-    .map_err(|e| map_add_intent(desc, intent, e))?;
+    let (_, (new_session_id, _, new_window_id, _, new_pane_id)) =
+        all_consuming((session_id, char(':'), window_id, char(':'), pane_id))
+            .parse(buffer)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
     Ok((new_session_id, new_window_id, new_pane_id))
 }
@@ -179,7 +176,7 @@ mod tests {
 
     #[test]
     fn parse_list_sessions() {
-        let output = vec![
+        let output = [
             "$1:'pytorch':/Users/graelo/ml/pytorch",
             "$2:'rust':/Users/graelo/rust",
             "$3:'server: $':/Users/graelo/swift",

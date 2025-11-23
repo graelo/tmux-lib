@@ -6,7 +6,7 @@ use nom::{
     character::complete::{char, digit1},
     combinator::all_consuming,
     sequence::preceded,
-    IResult,
+    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 
@@ -27,8 +27,9 @@ impl FromStr for WindowId {
         let desc = "WindowId";
         let intent = "#{window_id}";
 
-        let (_, window_id) =
-            all_consuming(parse::window_id)(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        let (_, window_id) = all_consuming(parse::window_id)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(window_id)
     }
@@ -45,7 +46,7 @@ pub(crate) mod parse {
     use super::*;
 
     pub(crate) fn window_id(input: &str) -> IResult<&str, WindowId> {
-        let (input, digit) = preceded(char('@'), digit1)(input)?;
+        let (input, digit) = preceded(char('@'), digit1).parse(input)?;
         let id = format!("@{digit}");
         Ok((input, WindowId(id)))
     }

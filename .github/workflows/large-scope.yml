@@ -29,12 +29,12 @@ jobs:
         continue-on-error: false
         with:
           path: |
-             ~/.cargo/bin/
-             ~/.cargo/registry/index/
-             ~/.cargo/registry/cache/
-             ~/.cargo/git/db/
-             target/
-          key: '${{ runner.os }}-cargo-${{ matrix.rust }}-hash-${{ hashFiles(''**/Cargo.lock'') }}'
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: "${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('Cargo.toml') }}"
 
       - name: Quality - cargo fmt
         run: |
@@ -55,14 +55,14 @@ jobs:
 
       # - name: Quality - cargo deny check
       #   run: |
-      #     curl -sSfL https://github.com/EmbarkStudios/cargo-deny/releases/download/0.12.2/cargo-deny-0.12.2-x86_64-unknown-linux-musl.tar.gz | tar zx --no-anchored cargo-deny --strip-components=1
+      #     curl -sSfL https://github.com/EmbarkStudios/cargo-deny/releases/download/0.18.5/cargo-deny-0.18.5-x86_64-unknown-linux-musl.tar.gz | tar zx --no-anchored cargo-deny --strip-components=1
       #     chmod +x cargo-deny
       #     mv cargo-deny ~/.cargo/bin/
       #     cargo deny check
 
       # - name: Quality - cargo audit check
       #   run: |
-      #     curl -sSfL https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.17.3/cargo-audit-x86_64-unknown-linux-musl-v0.17.3.tgz | tar zx --no-anchored cargo-audit --strip-components=1
+      #     curl -sSfL https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.22.0/cargo-audit-x86_64-unknown-linux-musl-v0.22.0.tgz | tar zx --no-anchored cargo-audit --strip-components=1
       #     chmod +x cargo-audit
       #     mv cargo-audit ~/.cargo/bin/
       #     rm -rf ~/.cargo/advisory-db/
@@ -96,7 +96,7 @@ jobs:
 
   test-other-platforms:
     name: Tests on
-    runs-on: '${{ matrix.os }}'
+    runs-on: "${{ matrix.os }}"
     strategy:
       matrix:
         include:
@@ -128,12 +128,12 @@ jobs:
         continue-on-error: false
         with:
           path: |
-             ~/.cargo/bin/
-             ~/.cargo/registry/index/
-             ~/.cargo/registry/cache/
-             ~/.cargo/git/db/
-             target/
-          key: '${{ runner.os }}-${{ matrix.target }}-cargo-${{ matrix.toolchain }}-${{ hashFiles(''**/Cargo.lock'') }}'
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: "${{ runner.os }}-${{ matrix.target }}-cargo-${{ matrix.toolchain }}-${{ hashFiles('Cargo.toml') }}"
 
       # - name: Quality - cargo fmt
       #   run: |

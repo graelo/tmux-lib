@@ -7,7 +7,7 @@ use nom::{
     character::complete::{char, digit1},
     combinator::all_consuming,
     sequence::preceded,
-    IResult,
+    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 
@@ -27,8 +27,9 @@ impl FromStr for PaneId {
         let desc = "PaneId";
         let intent = "#{pane_id}";
 
-        let (_, pane_id) =
-            all_consuming(parse::pane_id)(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        let (_, pane_id) = all_consuming(parse::pane_id)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(pane_id)
     }
@@ -55,10 +56,10 @@ impl fmt::Display for PaneId {
 }
 
 pub(crate) mod parse {
-    use super::{char, digit1, preceded, IResult, PaneId};
+    use super::{char, digit1, preceded, IResult, PaneId, Parser};
 
     pub(crate) fn pane_id(input: &str) -> IResult<&str, PaneId> {
-        let (input, digit) = preceded(char('%'), digit1)(input)?;
+        let (input, digit) = preceded(char('%'), digit1).parse(input)?;
         let id = format!("%{digit}");
         Ok((input, PaneId(id)))
     }

@@ -6,19 +6,18 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use async_std::process::Command;
 use nom::{
     character::complete::{char, digit1, not_line_ending},
     combinator::{all_consuming, map_res},
-    sequence::tuple,
-    IResult,
+    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
+use smol::process::Command;
 
 use crate::{
     error::{check_empty_process_output, map_add_intent, Error},
     pane_id::{parse::pane_id, PaneId},
-    parse::{boolean, quoted_nonempty_string},
+    parse::{boolean, quoted_nonempty_string, quoted_string},
     window_id::WindowId,
     Result,
 };
@@ -68,8 +67,9 @@ impl FromStr for Pane {
         let desc = "Pane";
         let intent = "#{pane_id}:#{pane_index}:#{?pane_active,true,false}:'#{pane_title}':'#{pane_current_command}':#{pane_current_path}";
 
-        let (_, pane) =
-            all_consuming(parse::pane)(input).map_err(|e| map_add_intent(desc, intent, e))?;
+        let (_, pane) = all_consuming(parse::pane)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
 
         Ok(pane)
     }
@@ -107,20 +107,20 @@ pub(crate) mod parse {
     use super::*;
 
     pub(crate) fn pane(input: &str) -> IResult<&str, Pane> {
-        let (input, (id, _, index, _, is_active, _, title, _, command, _, dirpath)) =
-            tuple((
-                pane_id,
-                char(':'),
-                map_res(digit1, str::parse),
-                char(':'),
-                boolean,
-                char(':'),
-                quoted_nonempty_string,
-                char(':'),
-                quoted_nonempty_string,
-                char(':'),
-                not_line_ending,
-            ))(input)?;
+        let (input, (id, _, index, _, is_active, _, title, _, command, _, dirpath)) = (
+            pane_id,
+            char(':'),
+            map_res(digit1, str::parse),
+            char(':'),
+            boolean,
+            char(':'),
+            quoted_string,
+            char(':'),
+            quoted_nonempty_string,
+            char(':'),
+            not_line_ending,
+        )
+            .parse(input)?;
 
         Ok((
             input,
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn parse_list_panes() {
-        let output = vec![
+        let output = [
             "%20:0:false:'rmbp':'nvim':/Users/graelo/code/rust/tmux-backup",
             "%21:1:true:'graelo@server: ~':'tmux':/Users/graelo/code/rust/tmux-backup",
             "%27:2:false:'rmbp':'man man':/Users/graelo/code/rust/tmux-backup",
@@ -251,5 +251,22 @@ mod tests {
         ];
 
         assert_eq!(panes, expected);
+    }
+
+    #[test]
+    fn parse_pane_with_empty_title() {
+        let line = "%20:0:false:'':'nvim':/Users/graelo/code/rust/tmux-backup";
+        let pane = Pane::from_str(line).expect("Could not parse pane with empty title");
+
+        let expected = Pane {
+            id: PaneId::from_str("%20").unwrap(),
+            index: 0,
+            is_active: false,
+            title: String::from(""),
+            dirpath: PathBuf::from_str("/Users/graelo/code/rust/tmux-backup").unwrap(),
+            command: String::from("nvim"),
+        };
+
+        assert_eq!(pane, expected);
     }
 }
