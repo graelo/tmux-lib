@@ -231,6 +231,7 @@ pub async fn select_window(window_id: &WindowId) -> Result<()> {
 mod tests {
     use super::Window;
     use super::WindowId;
+    use crate::pane_id::PaneId;
     use crate::Result;
     use std::str::FromStr;
 
@@ -367,5 +368,105 @@ mod tests {
         ];
 
         assert_eq!(windows, expected);
+    }
+
+    #[test]
+    fn parse_window_single_pane() {
+        let input = "@5:0:true:64f0,334x85,0,0,11:'ben':'rust'";
+        let window = Window::from_str(input).expect("Should parse window with single pane");
+
+        assert_eq!(window.id, WindowId::from_str("@5").unwrap());
+        assert_eq!(window.index, 0);
+        assert!(window.is_active);
+        assert_eq!(window.name, "ben");
+        assert_eq!(window.sessions, vec!["rust".to_string()]);
+    }
+
+    #[test]
+    fn parse_window_with_large_index() {
+        let input = "@100:99:false:64f0,334x85,0,0,11:'test':'session'";
+        let window = Window::from_str(input).expect("Should parse window with large index");
+
+        assert_eq!(window.id, WindowId::from_str("@100").unwrap());
+        assert_eq!(window.index, 99);
+        assert!(!window.is_active);
+    }
+
+    #[test]
+    fn parse_window_fails_on_missing_id() {
+        let input = "0:true:64f0,334x85,0,0,11:'name':'session'";
+        let result = Window::from_str(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_window_fails_on_invalid_boolean() {
+        let input = "@1:0:yes:64f0,334x85,0,0,11:'name':'session'";
+        let result = Window::from_str(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_window_fails_on_empty_name() {
+        let input = "@1:0:true:64f0,334x85,0,0,11:'':'session'";
+        let result = Window::from_str(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn window_pane_ids_single_pane() {
+        let window = Window {
+            id: WindowId::from_str("@1").unwrap(),
+            index: 0,
+            is_active: true,
+            layout: String::from("64f0,334x85,0,0,11"),
+            name: String::from("test"),
+            sessions: vec![String::from("session")],
+        };
+
+        let pane_ids = window.pane_ids();
+        assert_eq!(pane_ids.len(), 1);
+        assert_eq!(pane_ids[0], PaneId::from_str("%11").unwrap());
+    }
+
+    #[test]
+    fn window_pane_ids_multiple_panes() {
+        let window = Window {
+            id: WindowId::from_str("@3").unwrap(),
+            index: 2,
+            is_active: false,
+            layout: String::from("9e8b,334x85,0,0{167x85,0,0,8,166x85,168,0,9}"),
+            name: String::from("th-bits"),
+            sessions: vec![String::from("pytorch")],
+        };
+
+        let pane_ids = window.pane_ids();
+        assert_eq!(pane_ids.len(), 2);
+        assert_eq!(pane_ids[0], PaneId::from_str("%8").unwrap());
+        assert_eq!(pane_ids[1], PaneId::from_str("%9").unwrap());
+    }
+
+    #[test]
+    fn window_pane_ids_complex_layout() {
+        // Complex nested layout with 4 panes
+        let window = Window {
+            id: WindowId::from_str("@1").unwrap(),
+            index: 0,
+            is_active: true,
+            layout: String::from(
+                "035d,334x85,0,0{167x85,0,0,1,166x85,168,0[166x48,168,0,2,166x36,168,49,3]}",
+            ),
+            name: String::from("ignite"),
+            sessions: vec![String::from("pytorch")],
+        };
+
+        let pane_ids = window.pane_ids();
+        assert_eq!(pane_ids.len(), 3);
+        assert_eq!(pane_ids[0], PaneId::from_str("%1").unwrap());
+        assert_eq!(pane_ids[1], PaneId::from_str("%2").unwrap());
+        assert_eq!(pane_ids[2], PaneId::from_str("%3").unwrap());
     }
 }

@@ -109,3 +109,70 @@ pub async fn switch_client(session_name: &str) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Client;
+    use std::str::FromStr;
+
+    #[test]
+    fn parse_client_with_both_sessions() {
+        let input = "'current-session':'last-session'";
+        let client = Client::from_str(input).expect("Should parse valid client");
+
+        assert_eq!(client.session_name, "current-session");
+        assert_eq!(client.last_session_name, "last-session");
+    }
+
+    #[test]
+    fn parse_client_with_empty_last_session() {
+        // When there's no previous session, last_session is empty
+        let input = "'my-session':''";
+        let client = Client::from_str(input).expect("Should parse client with empty last session");
+
+        assert_eq!(client.session_name, "my-session");
+        assert_eq!(client.last_session_name, "");
+    }
+
+    #[test]
+    fn parse_client_with_special_chars_in_name() {
+        let input = "'server: $123':'dev-env'";
+        let client = Client::from_str(input).expect("Should parse client with special chars");
+
+        assert_eq!(client.session_name, "server: $123");
+        assert_eq!(client.last_session_name, "dev-env");
+    }
+
+    #[test]
+    fn parse_client_fails_on_empty_current_session() {
+        // Current session should not be empty
+        let input = "'':'last-session'";
+        let result = Client::from_str(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_client_fails_on_missing_quotes() {
+        let input = "current-session:last-session";
+        let result = Client::from_str(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_client_fails_on_missing_colon() {
+        let input = "'current-session''last-session'";
+        let result = Client::from_str(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_client_fails_on_extra_content() {
+        let input = "'current':'last':extra";
+        let result = Client::from_str(input);
+
+        assert!(result.is_err());
+    }
+}

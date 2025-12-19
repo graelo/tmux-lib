@@ -106,3 +106,144 @@ pub fn check_process_success(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::ExitStatus;
+
+    fn make_output(status_code: i32, stdout: &[u8], stderr: &[u8]) -> Output {
+        Output {
+            status: ExitStatus::from_raw(status_code << 8), // Unix exit codes are shifted
+            stdout: stdout.to_vec(),
+            stderr: stderr.to_vec(),
+        }
+    }
+
+    #[test]
+    fn check_empty_process_output_succeeds_when_empty() {
+        let output = make_output(0, b"", b"");
+        let result = check_empty_process_output(&output, "test-intent");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_empty_process_output_fails_when_stdout_not_empty() {
+        let output = make_output(0, b"some output", b"");
+        let result = check_empty_process_output(&output, "test-intent");
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            Error::UnexpectedTmuxOutput {
+                intent,
+                stdout,
+                stderr,
+            } => {
+                assert_eq!(intent, "test-intent");
+                assert_eq!(stdout, "some output");
+                assert_eq!(stderr, "");
+            }
+            _ => panic!("Expected UnexpectedTmuxOutput error"),
+        }
+    }
+
+    #[test]
+    fn check_empty_process_output_fails_when_stderr_not_empty() {
+        let output = make_output(0, b"", b"error message");
+        let result = check_empty_process_output(&output, "test-intent");
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            Error::UnexpectedTmuxOutput {
+                intent,
+                stdout,
+                stderr,
+            } => {
+                assert_eq!(intent, "test-intent");
+                assert_eq!(stdout, "");
+                assert_eq!(stderr, "error message");
+            }
+            _ => panic!("Expected UnexpectedTmuxOutput error"),
+        }
+    }
+
+    #[test]
+    fn check_empty_process_output_fails_when_both_not_empty() {
+        let output = make_output(0, b"stdout", b"stderr");
+        let result = check_empty_process_output(&output, "test-intent");
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            Error::UnexpectedTmuxOutput { stdout, stderr, .. } => {
+                assert_eq!(stdout, "stdout");
+                assert_eq!(stderr, "stderr");
+            }
+            _ => panic!("Expected UnexpectedTmuxOutput error"),
+        }
+    }
+
+    #[test]
+    fn check_process_success_succeeds_on_zero_exit() {
+        let output = make_output(0, b"output", b"");
+        let result = check_process_success(&output, "test-intent");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_process_success_fails_on_nonzero_exit() {
+        let output = make_output(1, b"", b"command failed");
+        let result = check_process_success(&output, "test-intent");
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            Error::UnexpectedTmuxOutput {
+                intent,
+                stdout,
+                stderr,
+            } => {
+                assert_eq!(intent, "test-intent");
+                assert_eq!(stdout, "");
+                assert_eq!(stderr, "command failed");
+            }
+            _ => panic!("Expected UnexpectedTmuxOutput error"),
+        }
+    }
+
+    #[test]
+    fn map_add_intent_creates_parse_error() {
+        use nom::error::{Error as NomError, ErrorKind};
+
+        let nom_err: nom::Err<NomError<&str>> =
+            nom::Err::Error(NomError::new("remaining input", ErrorKind::Tag));
+
+        let error = map_add_intent("description", "expected format", nom_err);
+
+        match error {
+            Error::ParseError { desc, intent, .. } => {
+                assert_eq!(desc, "description");
+                assert_eq!(intent, "expected format");
+            }
+            _ => panic!("Expected ParseError"),
+        }
+    }
+
+    #[test]
+    fn error_display_messages() {
+        // Test UnexpectedTmuxOutput display
+        let err = Error::UnexpectedTmuxOutput {
+            intent: "test",
+            stdout: "out".to_string(),
+            stderr: "err".to_string(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("unexpected process output"));
+        assert!(msg.contains("test"));
+
+        // Test TmuxConfig display
+        let err = Error::TmuxConfig("missing default-shell");
+        let msg = format!("{}", err);
+        assert!(msg.contains("unexpected tmux config"));
+        assert!(msg.contains("missing default-shell"));
+    }
+}

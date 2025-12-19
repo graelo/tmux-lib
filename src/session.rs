@@ -216,4 +216,75 @@ mod tests {
 
         assert_eq!(sessions, expected);
     }
+
+    #[test]
+    fn parse_session_with_large_id() {
+        let input = "$999:'large-id-session':/home/user/projects";
+        let session = Session::from_str(input).expect("Should parse session with large id");
+
+        assert_eq!(session.id, SessionId::from_str("$999").unwrap());
+        assert_eq!(session.name, "large-id-session");
+        assert_eq!(session.dirpath, PathBuf::from("/home/user/projects"));
+    }
+
+    #[test]
+    fn parse_session_with_spaces_in_path() {
+        let input = "$5:'dev':/Users/user/My Projects/rust";
+        let session = Session::from_str(input).expect("Should parse session with spaces in path");
+
+        assert_eq!(session.name, "dev");
+        assert_eq!(
+            session.dirpath,
+            PathBuf::from("/Users/user/My Projects/rust")
+        );
+    }
+
+    #[test]
+    fn parse_session_with_unicode_in_name() {
+        let input = "$6:'项目-日本語':/home/user/code";
+        let session = Session::from_str(input).expect("Should parse session with unicode name");
+
+        assert_eq!(session.name, "项目-日本語");
+    }
+
+    #[test]
+    fn parse_session_fails_on_missing_id() {
+        let input = "'session-name':/path/to/dir";
+        let result = Session::from_str(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_session_fails_on_missing_name_quotes() {
+        let input = "$1:session-name:/path/to/dir";
+        let result = Session::from_str(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_session_fails_on_empty_name() {
+        let input = "$1:'':/path/to/dir";
+        let result = Session::from_str(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_session_fails_on_malformed_id() {
+        let input = "@1:'session':/path"; // @ is window prefix, not session
+        let result = Session::from_str(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_session_with_colon_in_path() {
+        // Paths can contain colons (e.g., Windows-style paths or special paths)
+        let input = "$7:'test':/path/with:colon/here";
+        let session = Session::from_str(input).expect("Should parse session with colon in path");
+
+        assert_eq!(session.dirpath, PathBuf::from("/path/with:colon/here"));
+    }
 }
