@@ -65,7 +65,7 @@ impl FromStr for Pane {
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
         let desc = "Pane";
-        let intent = "#{pane_id}:#{pane_index}:#{?pane_active,true,false}:'#{pane_title}':'#{pane_current_command}':#{pane_current_path}";
+        let intent = "##{pane_id}:##{pane_index}:##{?pane_active,true,false}:'##{pane_title}':'##{pane_current_command}':##{pane_current_path}";
 
         let (_, pane) = all_consuming(parse::pane)
             .parse(input)

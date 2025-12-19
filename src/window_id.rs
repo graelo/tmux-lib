@@ -25,7 +25,7 @@ impl FromStr for WindowId {
     /// `u16`.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
         let desc = "WindowId";
-        let intent = "#{window_id}";
+        let intent = "##{window_id}";
 
         let (_, window_id) = all_consuming(parse::window_id)
             .parse(input)
@@ -78,7 +78,7 @@ mod tests {
             actual,
             Err(Error::ParseError {
                 desc: "WindowId",
-                intent: "#{window_id}",
+                intent: "##{window_id}",
                 err: _
             })
         ));

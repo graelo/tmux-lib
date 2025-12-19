@@ -62,7 +62,7 @@ impl FromStr for Session {
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
         let desc = "Session";
-        let intent = "#{session_id}:'#{session_name}':#{session_path}";
+        let intent = "##{session_id}:'##{session_name}':##{session_path}";
 
         let (_, sess) = all_consuming(parse::session)
             .parse(input)
@@ -162,7 +162,7 @@ pub async fn new_session(
     let buffer = buffer.trim_end();
 
     let desc = "new-session";
-    let intent = "#{session_id}:#{window_id}:#{pane_id}";
+    let intent = "##{session_id}:##{window_id}:##{pane_id}";
     let (_, (new_session_id, _, new_window_id, _, new_pane_id)) =
         all_consuming((session_id, char(':'), window_id, char(':'), pane_id))
             .parse(buffer)

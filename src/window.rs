@@ -75,7 +75,7 @@ impl FromStr for Window {
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
         let desc = "Window";
-        let intent = "#{window_id}:#{window_index}:#{?window_active,true,false}:#{window_layout}:'#{window_name}':'#{window_linked_sessions_list}'";
+        let intent = "##{window_id}:##{window_index}:##{?window_active,true,false}:##{window_layout}:'##{window_name}':'##{window_linked_sessions_list}'";
 
         let (_, window) = all_consuming(parse::window)
             .parse(input)
@@ -202,7 +202,7 @@ pub async fn new_window(
     let buffer = buffer.trim_end();
 
     let desc = "new-window";
-    let intent = "#{window_id}:#{pane_id}";
+    let intent = "##{window_id}:##{pane_id}";
 
     let (_, (new_window_id, _, new_pane_id)) = all_consuming((window_id, char(':'), pane_id))
         .parse(buffer)
