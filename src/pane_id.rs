@@ -25,7 +25,7 @@ impl FromStr for PaneId {
     /// Parse into `PaneId`. The `&str` must start with '%' followed by a `u32`.
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let desc = "PaneId";
-        let intent = "#{pane_id}";
+        let intent = "##{pane_id}";
 
         let (_, pane_id) = all_consuming(parse::pane_id)
             .parse(input)
@@ -91,7 +91,7 @@ mod tests {
             actual,
             Err(Error::ParseError {
                 desc: "PaneId",
-                intent: "#{pane_id}",
+                intent: "##{pane_id}",
                 err: _
             })
         ));

@@ -25,7 +25,7 @@ impl FromStr for SessionId {
     /// `u16`.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
         let desc = "SessionId";
-        let intent = "#{session_id}";
+        let intent = "##{session_id}";
 
         let (_, sess_id) = all_consuming(parse::session_id)
             .parse(input)
@@ -77,7 +77,7 @@ mod tests {
             actual,
             Err(Error::ParseError {
                 desc: "SessionId",
-                intent: "#{session_id}",
+                intent: "##{session_id}",
                 err: _
             })
         ));

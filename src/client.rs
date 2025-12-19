@@ -45,7 +45,7 @@ impl FromStr for Client {
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
         let desc = "Client";
-        let intent = "'#{client_session}':'#{client_last_session}'";
+        let intent = "'##{client_session}':'##{client_last_session}'";
         let parser = (quoted_nonempty_string, char(':'), quoted_string);
 
         let (_, (session_name, _, last_session_name)) = all_consuming(parser)
