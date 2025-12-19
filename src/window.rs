@@ -14,7 +14,7 @@ use nom::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    error::{check_empty_process_output, map_add_intent, Error},
+    error::{check_empty_process_output, check_process_success, map_add_intent, Error},
     layout::{self, window_layout},
     pane::Pane,
     pane_id::{parse::pane_id, PaneId},
@@ -193,6 +193,11 @@ pub async fn new_window(
     }
 
     let output = Command::new("tmux").args(&args).output().await?;
+
+    // Check exit status before parsing to avoid confusing parse errors
+    // when tmux fails and returns empty/garbage stdout.
+    check_process_success(&output, "new-window")?;
+
     let buffer = String::from_utf8(output.stdout)?;
     let buffer = buffer.trim_end();
 
