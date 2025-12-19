@@ -274,4 +274,83 @@ mod tests {
 
         assert_eq!(pane, expected);
     }
+
+    #[test]
+    fn parse_pane_with_large_index() {
+        let line = "%999:99:true:'host':'zsh':/home/user";
+        let pane = Pane::from_str(line).expect("Should parse pane with large index");
+
+        assert_eq!(pane.id, PaneId::from_str("%999").unwrap());
+        assert_eq!(pane.index, 99);
+        assert!(pane.is_active);
+    }
+
+    #[test]
+    fn parse_pane_with_spaces_in_path() {
+        let line = "%1:0:false:'title':'vim':/Users/user/My Documents/project";
+        let pane = Pane::from_str(line).expect("Should parse pane with spaces in path");
+
+        assert_eq!(
+            pane.dirpath,
+            PathBuf::from("/Users/user/My Documents/project")
+        );
+    }
+
+    #[test]
+    fn parse_pane_with_unicode_title() {
+        let line = "%1:0:true:'日本語タイトル':'bash':/home/user";
+        let pane = Pane::from_str(line).expect("Should parse pane with unicode title");
+
+        assert_eq!(pane.title, "日本語タイトル");
+    }
+
+    #[test]
+    fn parse_pane_with_complex_command() {
+        let line = "%1:0:false:'host':'python -m http.server 8080':/tmp";
+        let pane = Pane::from_str(line).expect("Should parse pane with complex command");
+
+        assert_eq!(pane.command, "python -m http.server 8080");
+    }
+
+    #[test]
+    fn parse_pane_fails_on_missing_id() {
+        let line = "0:false:'title':'cmd':/path";
+        let result = Pane::from_str(line);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_pane_fails_on_invalid_boolean() {
+        let line = "%1:0:yes:'title':'cmd':/path";
+        let result = Pane::from_str(line);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_pane_fails_on_empty_command() {
+        // Command must be nonempty (uses quoted_nonempty_string)
+        let line = "%1:0:true:'title':'':/path";
+        let result = Pane::from_str(line);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_pane_fails_on_missing_path() {
+        let line = "%1:0:true:'title':'cmd'";
+        let result = Pane::from_str(line);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_pane_fails_on_wrong_id_prefix() {
+        // % is for pane, @ is for window, $ is for session
+        let line = "@1:0:true:'title':'cmd':/path";
+        let result = Pane::from_str(line);
+
+        assert!(result.is_err());
+    }
 }

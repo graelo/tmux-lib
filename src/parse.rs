@@ -58,4 +58,83 @@ mod tests {
         assert!(input.is_empty());
         assert!(res.is_empty());
     }
+
+    #[test]
+    fn test_quoted_string_with_content() {
+        let (input, res) = quoted_string("'hello world'").unwrap();
+        assert!(input.is_empty());
+        assert_eq!(res, "hello world");
+    }
+
+    #[test]
+    fn test_quoted_string_with_escaped_quote() {
+        let (input, res) = quoted_string(r"'it\'s working'").unwrap();
+        assert!(input.is_empty());
+        assert_eq!(res, r"it\'s working");
+    }
+
+    #[test]
+    fn test_quoted_string_leaves_remaining_input() {
+        let (input, res) = quoted_string("'first':rest").unwrap();
+        assert_eq!(input, ":rest");
+        assert_eq!(res, "first");
+    }
+
+    #[test]
+    fn test_quoted_string_fails_without_quotes() {
+        assert!(quoted_string("no quotes").is_err());
+    }
+
+    #[test]
+    fn test_quoted_string_fails_on_unclosed() {
+        assert!(quoted_string("'unclosed").is_err());
+    }
+
+    #[test]
+    fn test_quoted_nonempty_string_with_special_chars() {
+        let (input, res) = quoted_nonempty_string("'path/to/file:with:colons'").unwrap();
+        assert!(input.is_empty());
+        assert_eq!(res, "path/to/file:with:colons");
+    }
+
+    #[test]
+    fn test_quoted_nonempty_string_fails_on_empty() {
+        assert!(quoted_nonempty_string("''").is_err());
+    }
+
+    #[test]
+    fn test_boolean_true() {
+        let (input, res) = boolean("true").unwrap();
+        assert!(input.is_empty());
+        assert!(res);
+    }
+
+    #[test]
+    fn test_boolean_false() {
+        let (input, res) = boolean("false").unwrap();
+        assert!(input.is_empty());
+        assert!(!res);
+    }
+
+    #[test]
+    fn test_boolean_leaves_remaining_input() {
+        let (input, res) = boolean("true:next").unwrap();
+        assert_eq!(input, ":next");
+        assert!(res);
+    }
+
+    #[test]
+    fn test_boolean_fails_on_invalid() {
+        assert!(boolean("yes").is_err());
+        assert!(boolean("no").is_err());
+        assert!(boolean("1").is_err());
+        assert!(boolean("0").is_err());
+        assert!(boolean("TRUE").is_err());
+        assert!(boolean("FALSE").is_err());
+    }
+
+    #[test]
+    fn test_boolean_fails_on_empty() {
+        assert!(boolean("").is_err());
+    }
 }

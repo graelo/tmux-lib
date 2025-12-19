@@ -83,4 +83,60 @@ mod tests {
             })
         ));
     }
+
+    #[test]
+    fn test_parse_window_id_with_large_number() {
+        let window_id = WindowId::from_str("@99999").unwrap();
+        assert_eq!(window_id.as_str(), "@99999");
+    }
+
+    #[test]
+    fn test_parse_window_id_zero() {
+        let window_id = WindowId::from_str("@0").unwrap();
+        assert_eq!(window_id.as_str(), "@0");
+    }
+
+    #[test]
+    fn test_parse_window_id_fails_on_wrong_prefix() {
+        // $ is for session, % is for pane
+        assert!(WindowId::from_str("$1").is_err());
+        assert!(WindowId::from_str("%1").is_err());
+    }
+
+    #[test]
+    fn test_parse_window_id_fails_on_no_prefix() {
+        assert!(WindowId::from_str("123").is_err());
+    }
+
+    #[test]
+    fn test_parse_window_id_fails_on_empty() {
+        assert!(WindowId::from_str("").is_err());
+        assert!(WindowId::from_str("@").is_err());
+    }
+
+    #[test]
+    fn test_parse_window_id_fails_on_non_numeric() {
+        assert!(WindowId::from_str("@abc").is_err());
+        assert!(WindowId::from_str("@12abc").is_err());
+    }
+
+    #[test]
+    fn test_parse_window_id_fails_on_extra_content() {
+        // all_consuming should reject trailing content
+        assert!(WindowId::from_str("@12:extra").is_err());
+    }
+
+    #[test]
+    fn test_window_id_as_str() {
+        let window_id = WindowId::from_str("@42").unwrap();
+        assert_eq!(window_id.as_str(), "@42");
+    }
+
+    #[test]
+    fn test_window_id_leaves_remaining_in_parser() {
+        // The parse function (not FromStr) should leave remaining input
+        let (remaining, window_id) = parse::window_id("@42:rest").unwrap();
+        assert_eq!(remaining, ":rest");
+        assert_eq!(window_id, WindowId("@42".into()));
+    }
 }
