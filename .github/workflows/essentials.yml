@@ -22,14 +22,14 @@ jobs:
           components: rustfmt, clippy
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           # fetch-depth: ${{ github.event.pull_request.commits }}
 
       - name: Cache crates from crates.io
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         continue-on-error: false
         with:
           path: |
@@ -66,14 +66,18 @@ jobs:
 
       - name: Quality - cargo deny check
         run: |
-          curl -sSfL https://github.com/EmbarkStudios/cargo-deny/releases/download/0.18.5/cargo-deny-0.18.5-x86_64-unknown-linux-musl.tar.gz | tar zx --no-anchored cargo-deny --strip-components=1
+          VERSION=$(curl -s https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/latest | jq -r '.tag_name')
+          curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${VERSION}/cargo-deny-${VERSION}-x86_64-unknown-linux-musl.tar.gz" | \
+            tar zx --no-anchored cargo-deny --strip-components=1
           chmod +x cargo-deny
           mv cargo-deny ~/.cargo/bin/
           cargo deny check
 
       - name: Quality - cargo audit check
         run: |
-          curl -sSfL https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.22.0/cargo-audit-x86_64-unknown-linux-musl-v0.22.0.tgz | tar zx --no-anchored cargo-audit --strip-components=1
+          VERSION=$(curl -s https://api.github.com/repos/rustsec/rustsec/releases/latest | jq -r '.tag_name')
+          curl -sSfL "https://github.com/rustsec/rustsec/releases/download/${VERSION}/cargo-audit-x86_64-unknown-linux-musl-${VERSION#cargo-audit/}.tgz" | \
+            tar zx --no-anchored cargo-audit --strip-components=1
           chmod +x cargo-audit
           mv cargo-audit ~/.cargo/bin/
           rm -rf ~/.cargo/advisory-db/
@@ -82,7 +86,11 @@ jobs:
       - name: Quality - cargo outdated
         timeout-minutes: 20
         run: |
-          cargo install --locked cargo-outdated || true
+          VERSION=$(curl -s https://api.github.com/repos/kbknapp/cargo-outdated/releases/latest | jq -r '.tag_name')
+          curl -sSfL "https://github.com/kbknapp/cargo-outdated/releases/download/${VERSION}/cargo-outdated-${VERSION#v}-x86_64-unknown-linux-musl.tar.gz" | \
+            tar zx
+          chmod +x cargo-outdated
+          mv cargo-outdated ~/.cargo/bin/
           rm -rf ~/.cargo/advisory-db
           cargo outdated --exit-code 1
 
