@@ -35,11 +35,11 @@ impl FromStr for SessionId {
     }
 }
 
-// impl SessionId {
-//     pub fn as_str(&self) -> &str {
-//         &self.0
-//     }
-// }
+impl SessionId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 pub(crate) mod parse {
     use super::*;
