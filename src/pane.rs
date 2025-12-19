@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use smol::process::Command;
 
 use crate::{
-    error::{check_empty_process_output, map_add_intent, Error},
+    error::{check_empty_process_output, check_process_success, map_add_intent, Error},
     pane_id::{parse::pane_id, PaneId},
     parse::{boolean, quoted_nonempty_string, quoted_string},
     window_id::WindowId,
@@ -191,6 +191,11 @@ pub async fn new_pane(
     }
 
     let output = Command::new("tmux").args(&args).output().await?;
+
+    // Check exit status before parsing to avoid confusing parse errors
+    // when tmux fails and returns empty/garbage stdout.
+    check_process_success(&output, "split-window")?;
+
     let buffer = String::from_utf8(output.stdout)?;
 
     let new_id = PaneId::from_str(buffer.trim_end())?;

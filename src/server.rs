@@ -1,13 +1,19 @@
 //! Server management.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
-use smol::process::Command;
+use smol::{future, process::Command, Timer};
 
 use crate::{
     error::{check_empty_process_output, Error},
     Result,
 };
+
+/// Maximum time to wait for the server to become ready.
+const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Delay between readiness checks.
+const SERVER_READY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 // ------------------------------
 // Ops
@@ -16,12 +22,52 @@ use crate::{
 /// Start the Tmux server if needed, creating a session named `"[placeholder]"` in order to keep the server
 /// running.
 ///
+/// This function waits for the server to be fully ready before returning, ensuring
+/// subsequent commands can be executed immediately.
+///
 /// It is ok-ish to already have an existing session named `"[placeholder]"`.
 pub async fn start(initial_session_name: &str) -> Result<()> {
     let args = vec!["new-session", "-d", "-s", initial_session_name];
 
     let output = Command::new("tmux").args(&args).output().await?;
-    check_empty_process_output(&output, "new-session")
+    check_empty_process_output(&output, "new-session")?;
+
+    // Wait for the server to be fully ready to accept commands.
+    wait_for_server_ready().await
+}
+
+/// Wait for the tmux server to be ready to accept commands.
+///
+/// This polls the server using `tmux list-sessions` until it succeeds or times out.
+async fn wait_for_server_ready() -> Result<()> {
+    let poll = async {
+        loop {
+            let output = Command::new("tmux")
+                .args(["list-sessions", "-F", "#{session_name}"])
+                .output()
+                .await?;
+
+            if output.status.success() {
+                return Ok(());
+            }
+
+            Timer::after(SERVER_READY_POLL_INTERVAL).await;
+        }
+    };
+
+    let timeout = async {
+        Timer::after(SERVER_READY_TIMEOUT).await;
+        Err(Error::UnexpectedTmuxOutput {
+            intent: "wait-for-server-ready",
+            stdout: String::new(),
+            stderr: format!(
+                "server did not become ready within {:?}",
+                SERVER_READY_TIMEOUT
+            ),
+        })
+    };
+
+    future::or(poll, timeout).await
 }
 
 /// Remove the session named `"[placeholder]"` used to keep the server alive.

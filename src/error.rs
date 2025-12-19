@@ -82,3 +82,27 @@ pub fn check_empty_process_output(
     }
     Ok(())
 }
+
+/// Ensure that the tmux command succeeded (exit status 0) before parsing its output.
+///
+/// This prevents confusing parse errors when tmux fails and returns empty or
+/// garbage stdout. Instead, we get a clear error with the actual stderr message.
+///
+/// # Errors
+///
+/// Returns `Error::UnexpectedTmuxOutput` if the command exited with non-zero status.
+pub fn check_process_success(
+    output: &Output,
+    intent: &'static str,
+) -> std::result::Result<(), Error> {
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout[..]).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr[..]).to_string();
+        return Err(Error::UnexpectedTmuxOutput {
+            intent,
+            stdout,
+            stderr,
+        });
+    }
+    Ok(())
+}

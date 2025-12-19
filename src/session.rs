@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use smol::process::Command;
 
 use crate::{
-    error::{map_add_intent, Error},
+    error::{check_process_success, map_add_intent, Error},
     pane::Pane,
     pane_id::{parse::pane_id, PaneId},
     parse::quoted_nonempty_string,
@@ -153,6 +153,11 @@ pub async fn new_session(
     }
 
     let output = Command::new("tmux").args(&args).output().await?;
+
+    // Check exit status before parsing to avoid confusing parse errors
+    // when tmux fails and returns empty/garbage stdout.
+    check_process_success(&output, "new-session")?;
+
     let buffer = String::from_utf8(output.stdout)?;
     let buffer = buffer.trim_end();
 
