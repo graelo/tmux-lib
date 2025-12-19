@@ -36,6 +36,12 @@ jobs:
             target/
           key: "${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.toml') }}"
 
+      - name: Install tmux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+          tmux -V
+
       - name: Quality - cargo fmt
         run: |
           cargo fmt --all -- --check
@@ -67,10 +73,6 @@ jobs:
             target: aarch64-apple-darwin
             type: unix
             toolchain: stable
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            type: windows
-            toolchain: stable
     steps:
       - name: Rust install
         uses: dtolnay/rust-toolchain@master
@@ -93,6 +95,11 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: "${{ runner.os }}-${{ matrix.target }}-cargo-${{ matrix.toolchain }}-${{ hashFiles('Cargo.toml') }}"
+
+      - name: Install tmux
+        run: |
+          brew install tmux
+          tmux -V
 
       # - name: Quality - cargo fmt
       #   run: |
