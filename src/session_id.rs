@@ -82,4 +82,54 @@ mod tests {
             })
         ));
     }
+
+    #[test]
+    fn test_parse_session_id_with_large_number() {
+        let session_id = SessionId::from_str("$99999").unwrap();
+        assert_eq!(session_id, SessionId("$99999".into()));
+    }
+
+    #[test]
+    fn test_parse_session_id_zero() {
+        let session_id = SessionId::from_str("$0").unwrap();
+        assert_eq!(session_id, SessionId("$0".into()));
+    }
+
+    #[test]
+    fn test_parse_session_id_fails_on_wrong_prefix() {
+        // @ is for window, % is for pane
+        assert!(SessionId::from_str("@1").is_err());
+        assert!(SessionId::from_str("%1").is_err());
+    }
+
+    #[test]
+    fn test_parse_session_id_fails_on_no_prefix() {
+        assert!(SessionId::from_str("123").is_err());
+    }
+
+    #[test]
+    fn test_parse_session_id_fails_on_empty() {
+        assert!(SessionId::from_str("").is_err());
+        assert!(SessionId::from_str("$").is_err());
+    }
+
+    #[test]
+    fn test_parse_session_id_fails_on_non_numeric() {
+        assert!(SessionId::from_str("$abc").is_err());
+        assert!(SessionId::from_str("$12abc").is_err());
+    }
+
+    #[test]
+    fn test_parse_session_id_fails_on_extra_content() {
+        // all_consuming should reject trailing content
+        assert!(SessionId::from_str("$12:extra").is_err());
+    }
+
+    #[test]
+    fn test_session_id_leaves_remaining_in_parser() {
+        // The parse function (not FromStr) should leave remaining input
+        let (remaining, session_id) = parse::session_id("$42:rest").unwrap();
+        assert_eq!(remaining, ":rest");
+        assert_eq!(session_id, SessionId("$42".into()));
+    }
 }

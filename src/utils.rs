@@ -90,7 +90,7 @@ pub fn cleanup_captured_buffer(buffer: &[u8], drop_n_last_lines: usize) -> Vec<u
 
 #[cfg(test)]
 mod tests {
-    use super::{buf_trim_trailing, drop_last_empty_lines, SliceExt};
+    use super::{buf_trim_trailing, cleanup_captured_buffer, drop_last_empty_lines, SliceExt};
 
     #[test]
     fn trims_trailing_whitespaces() {
@@ -135,5 +135,105 @@ mod tests {
         let actual = drop_last_empty_lines(&trimmed_lines);
         let expected = vec!["line1".as_bytes(), "line2".as_bytes()];
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_trim_only_whitespace() {
+        let input = "   \t  ".as_bytes();
+        assert_eq!(input.trim(), &[]);
+        assert_eq!(input.trim_trailing(), &[]);
+    }
+
+    #[test]
+    fn test_trim_empty() {
+        let input = "".as_bytes();
+        assert_eq!(input.trim(), &[]);
+        assert_eq!(input.trim_trailing(), &[]);
+    }
+
+    #[test]
+    fn test_trim_tabs() {
+        let input = "\t\ttext\t\t".as_bytes();
+        assert_eq!(input.trim(), "text".as_bytes());
+        assert_eq!(input.trim_trailing(), "\t\ttext".as_bytes());
+    }
+
+    #[test]
+    fn test_cleanup_captured_buffer_basic() {
+        let input = "line1\nline2\n";
+        let result = cleanup_captured_buffer(input.as_bytes(), 0);
+
+        // Should have lines with reset code on last line
+        let result_str = String::from_utf8(result).unwrap();
+        assert!(result_str.contains("line1\n"));
+        assert!(result_str.contains("line2"));
+        assert!(result_str.contains("\u{001b}[0m")); // reset code
+    }
+
+    #[test]
+    fn test_cleanup_captured_buffer_trims_trailing_spaces() {
+        let input = "line1   \nline2   \n";
+        let result = cleanup_captured_buffer(input.as_bytes(), 0);
+
+        let result_str = String::from_utf8(result).unwrap();
+        // Lines should be trimmed of trailing spaces
+        assert!(result_str.starts_with("line1\n"));
+        assert!(result_str.contains("line2\u{001b}[0m\n"));
+    }
+
+    #[test]
+    fn test_cleanup_captured_buffer_drops_empty_trailing_lines() {
+        let input = "line1\nline2\n\n\n   \n";
+        let result = cleanup_captured_buffer(input.as_bytes(), 0);
+
+        let result_str = String::from_utf8(result).unwrap();
+        // Should only have line1 and line2, no trailing empty lines
+        assert_eq!(result_str, "line1\nline2\u{001b}[0m\n");
+    }
+
+    #[test]
+    fn test_cleanup_captured_buffer_drop_n_last_lines() {
+        let input = "line1\nline2\nline3\nline4\n";
+        let result = cleanup_captured_buffer(input.as_bytes(), 2);
+
+        let result_str = String::from_utf8(result).unwrap();
+        // Should drop last 2 lines (line3 and line4)
+        assert_eq!(result_str, "line1\nline2\u{001b}[0m\n");
+    }
+
+    #[test]
+    fn test_cleanup_captured_buffer_single_line() {
+        let input = "single line   \n";
+        let result = cleanup_captured_buffer(input.as_bytes(), 0);
+
+        let result_str = String::from_utf8(result).unwrap();
+        assert_eq!(result_str, "single line\u{001b}[0m\n");
+    }
+
+    #[test]
+    fn test_cleanup_captured_buffer_preserves_escape_codes() {
+        // Simulate content with existing escape codes
+        let input = "\u{001b}[32mgreen text\u{001b}[0m\n";
+        let result = cleanup_captured_buffer(input.as_bytes(), 0);
+
+        let result_str = String::from_utf8(result).unwrap();
+        // Should preserve existing escape codes and add reset at end
+        assert!(result_str.contains("\u{001b}[32m"));
+        assert!(result_str.ends_with("\u{001b}[0m\n"));
+    }
+
+    #[test]
+    fn test_drop_last_empty_lines_all_empty() {
+        let lines: Vec<&[u8]> = vec![b"", b"", b""];
+        let result = drop_last_empty_lines(&lines);
+        // When all lines are empty, should return as-is
+        assert_eq!(result, lines);
+    }
+
+    #[test]
+    fn test_drop_last_empty_lines_no_empty() {
+        let lines: Vec<&[u8]> = vec![b"a", b"b", b"c"];
+        let result = drop_last_empty_lines(&lines);
+        assert_eq!(result, lines);
     }
 }
