@@ -173,7 +173,10 @@ pub async fn new_window(
     pane: &Pane,
     pane_command: Option<&str>,
 ) -> Result<(WindowId, PaneId)> {
-    let exact_session_name = format!("={}", session.name);
+    // Use session ID for targeting - it's unambiguous and immediately valid
+    // after session creation, unlike names which may have parsing issues
+    // (e.g., names containing colons) or brief lookup race conditions.
+    let target_session = session.id.as_str();
 
     let mut args = vec![
         "new-window",
@@ -183,7 +186,7 @@ pub async fn new_window(
         "-n",
         &window.name,
         "-t",
-        &exact_session_name,
+        target_session,
         "-P",
         "-F",
         "#{window_id}:#{pane_id}",
