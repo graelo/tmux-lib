@@ -40,6 +40,12 @@ jobs:
             target/
           key: "${{ runner.os }}-cargo-${{ matrix.rust }}-hash-${{ hashFiles('**/Cargo.lock') }}"
 
+      - name: Install tmux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+          tmux -V
+
       - name: Quality - cargo fmt
         run: |
           cargo fmt --all -- --check
