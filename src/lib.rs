@@ -1,6 +1,6 @@
 //! Read or manipulate Tmux.
 //!
-//! Version requirement: _rustc 1.74.0+_
+//! Version requirement: _rustc 1.85.0+_
 //!
 //! ```toml
 //! [dependencies]

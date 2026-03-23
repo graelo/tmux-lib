@@ -2,24 +2,23 @@
 name = "tmux-lib"
 version = "0.4.2"
 edition = "2021"
-rust-version = "1.74.0"
+rust-version = "1.85.0"
 description = "Tmux helper functions."
 readme = "README.md"
 
-license = "MIT OR Apache-2.0"
-authors = ["graelo <graelo@graelo.cc>"]
-repository = "https://github.com/graelo/tmux-lib"
-homepage = "https://github.com/graelo/tmux-lib"
 documentation = "https://docs.rs/tmux-lib"
+homepage = "https://github.com/graelo/tmux-lib"
+repository = "https://github.com/graelo/tmux-lib"
+license = "MIT OR Apache-2.0"
 
 keywords = ["tmux", "tmux-plugin"]
 categories = ["command-line-utilities"]
-exclude = ["/.github", "/ci", "/.travis.yml", "/appveyor.yml"]
+exclude = ["/.github", "/.travis.yml", "/appveyor.yml", "/ci"]
 
 [dependencies]
 thiserror = "2"
 
-serde = { version = "1.0", features = ["derive"] }
 nom = "8"
+serde = { version = "1.0", features = ["derive"] }
 
 smol = "2"
