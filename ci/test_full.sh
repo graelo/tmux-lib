@@ -27,15 +27,20 @@ if ! check_version $MSRV ; then
   exit 1
 fi
 
+NEXTEST_PROFILE=""
+if [ -n "$CI" ]; then
+  NEXTEST_PROFILE="--profile ci"
+fi
+
 set -x
 
 # test the default
 cargo build
-cargo nextest run
+cargo nextest run $NEXTEST_PROFILE
 
 # test all features
 cargo build --all-features
-cargo nextest run --all-features
+cargo nextest run $NEXTEST_PROFILE --all-features
 
 # doc tests (not supported by nextest)
 cargo test --doc
