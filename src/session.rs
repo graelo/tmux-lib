@@ -6,22 +6,22 @@
 use std::{path::PathBuf, str::FromStr};
 
 use nom::{
+    IResult, Parser,
     character::complete::{char, not_line_ending},
     combinator::all_consuming,
-    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 use smol::process::Command;
 
 use crate::{
-    error::{check_process_success, map_add_intent, Error},
-    pane::Pane,
-    pane_id::{parse::pane_id, PaneId},
-    parse::quoted_nonempty_string,
-    session_id::{parse::session_id, SessionId},
-    window::Window,
-    window_id::{parse::window_id, WindowId},
     Result,
+    error::{Error, check_process_success, map_add_intent},
+    pane::Pane,
+    pane_id::{PaneId, parse::pane_id},
+    parse::quoted_nonempty_string,
+    session_id::{SessionId, parse::session_id},
+    window::Window,
+    window_id::{WindowId, parse::window_id},
 };
 
 /// A Tmux session.

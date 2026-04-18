@@ -1,10 +1,10 @@
 use nom::{
+    IResult, Parser,
     branch::alt,
     bytes::complete::{escaped, tag},
     character::complete::none_of,
     combinator::value,
     sequence::delimited,
-    IResult, Parser,
 };
 
 /// Return the `&str` between single quotes. The returned string may be empty.

@@ -7,21 +7,21 @@ use std::str::FromStr;
 use smol::process::Command;
 
 use nom::{
+    IResult, Parser,
     character::complete::{char, digit1},
     combinator::{all_consuming, map_res, recognize},
-    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    error::{check_empty_process_output, check_process_success, map_add_intent, Error},
+    Result,
+    error::{Error, check_empty_process_output, check_process_success, map_add_intent},
     layout::{self, window_layout},
     pane::Pane,
-    pane_id::{parse::pane_id, PaneId},
+    pane_id::{PaneId, parse::pane_id},
     parse::{boolean, quoted_nonempty_string},
     session::Session,
-    window_id::{parse::window_id, WindowId},
-    Result,
+    window_id::{WindowId, parse::window_id},
 };
 
 /// A Tmux window.
@@ -234,8 +234,8 @@ pub async fn select_window(window_id: &WindowId) -> Result<()> {
 mod tests {
     use super::Window;
     use super::WindowId;
-    use crate::pane_id::PaneId;
     use crate::Result;
+    use crate::pane_id::PaneId;
     use std::str::FromStr;
 
     #[test]
@@ -282,9 +282,7 @@ mod tests {
                 id: WindowId::from_str("@3").unwrap(),
                 index: 2,
                 is_active: false,
-                layout: String::from(
-                    "9e8b,334x85,0,0{167x85,0,0,8,166x85,168,0,9}",
-                ),
+                layout: String::from("9e8b,334x85,0,0{167x85,0,0,8,166x85,168,0,9}"),
                 name: String::from("th-bits"),
                 sessions: vec![String::from("pytorch")],
             },
@@ -292,9 +290,7 @@ mod tests {
                 id: WindowId::from_str("@4").unwrap(),
                 index: 3,
                 is_active: false,
-                layout: String::from(
-                    "64ef,334x85,0,0,10",
-                ),
+                layout: String::from("64ef,334x85,0,0,10"),
                 name: String::from("docker-pytorch"),
                 sessions: vec![String::from("pytorch")],
             },
@@ -302,9 +298,7 @@ mod tests {
                 id: WindowId::from_str("@5").unwrap(),
                 index: 0,
                 is_active: true,
-                layout: String::from(
-                    "64f0,334x85,0,0,11",
-                ),
+                layout: String::from("64f0,334x85,0,0,11"),
                 name: String::from("ben"),
                 sessions: vec![String::from("rust")],
             },
@@ -312,9 +306,7 @@ mod tests {
                 id: WindowId::from_str("@6").unwrap(),
                 index: 1,
                 is_active: false,
-                layout: String::from(
-                    "64f1,334x85,0,0,12",
-                ),
+                layout: String::from("64f1,334x85,0,0,12"),
                 name: String::from("pyo3"),
                 sessions: vec![String::from("rust")],
             },
@@ -322,9 +314,7 @@ mod tests {
                 id: WindowId::from_str("@7").unwrap(),
                 index: 2,
                 is_active: false,
-                layout: String::from(
-                    "64f2,334x85,0,0,13",
-                ),
+                layout: String::from("64f2,334x85,0,0,13"),
                 name: String::from("mdns-repeater"),
                 sessions: vec![String::from("rust")],
             },
@@ -332,9 +322,7 @@ mod tests {
                 id: WindowId::from_str("@8").unwrap(),
                 index: 0,
                 is_active: true,
-                layout: String::from(
-                    "64f3,334x85,0,0,14",
-                ),
+                layout: String::from("64f3,334x85,0,0,14"),
                 name: String::from("combine"),
                 sessions: vec![String::from("swift")],
             },
@@ -342,9 +330,7 @@ mod tests {
                 id: WindowId::from_str("@9").unwrap(),
                 index: 0,
                 is_active: false,
-                layout: String::from(
-                    "64f4,334x85,0,0,15",
-                ),
+                layout: String::from("64f4,334x85,0,0,15"),
                 name: String::from("copyrat"),
                 sessions: vec![String::from("tmux-hacking")],
             },

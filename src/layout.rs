@@ -12,15 +12,15 @@
 //! The parser in this module returns the corresponding [`WindowLayout`].
 
 use nom::{
+    IResult, Parser,
     branch::alt,
     character::complete::{char, digit1, hex_digit1},
     combinator::{all_consuming, map_res},
     multi::separated_list1,
     sequence::delimited,
-    IResult, Parser,
 };
 
-use crate::{error::map_add_intent, Result};
+use crate::{Result, error::map_add_intent};
 
 /// Represent a parsed window layout.
 #[derive(Debug, PartialEq, Eq)]
@@ -193,8 +193,8 @@ fn container(input: &str) -> IResult<&str, Container> {
 mod tests {
 
     use super::{
-        coordinates, dimensions, layout_id, single_pane, vert_split, window_layout, Container,
-        Coordinates, Dimensions, Element, Split, WindowLayout,
+        Container, Coordinates, Dimensions, Element, Split, WindowLayout, coordinates, dimensions,
+        layout_id, single_pane, vert_split, window_layout,
     };
 
     #[test]

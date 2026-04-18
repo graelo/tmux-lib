@@ -238,33 +238,30 @@ mod session_tests {
 
             let panes = pane::available_panes().await.unwrap();
 
-            if let Some(window) = our_window {
-                let our_pane_ids = window.pane_ids();
-                let pane = panes.iter().find(|p| our_pane_ids.contains(&p.id));
+            if let Some(window) = our_window
+                && let Some(pane) = panes.iter().find(|p| window.pane_ids().contains(&p.id))
+            {
+                // Create a template session
+                let template_session = Session {
+                    id: SessionId::from_str("$0").unwrap(),
+                    name: new_session_name.clone(),
+                    dirpath: pane.dirpath.clone(),
+                };
 
-                if let Some(pane) = pane {
-                    // Create a template session
-                    let template_session = Session {
-                        id: SessionId::from_str("$0").unwrap(),
-                        name: new_session_name.clone(),
-                        dirpath: pane.dirpath.clone(),
-                    };
+                // Create the new session
+                let result = session::new_session(&template_session, window, pane, None).await;
+                assert!(result.is_ok(), "Failed to create session: {:?}", result);
 
-                    // Create the new session
-                    let result = session::new_session(&template_session, window, pane, None).await;
-                    assert!(result.is_ok(), "Failed to create session: {:?}", result);
+                let (sess_id, win_id, pane_id) = result.unwrap();
+                // Just verify they were created (IDs are opaque types)
+                let _ = sess_id;
+                assert!(win_id.as_str().starts_with('@'));
+                assert!(pane_id.as_str().starts_with('%'));
 
-                    let (sess_id, win_id, pane_id) = result.unwrap();
-                    // Just verify they were created (IDs are opaque types)
-                    let _ = sess_id;
-                    assert!(win_id.as_str().starts_with('@'));
-                    assert!(pane_id.as_str().starts_with('%'));
-
-                    // Verify the session exists
-                    let sessions = session::available_sessions().await.unwrap();
-                    let found = sessions.iter().any(|s| s.name == new_session_name);
-                    assert!(found, "New session should exist");
-                }
+                // Verify the session exists
+                let sessions = session::available_sessions().await.unwrap();
+                let found = sessions.iter().any(|s| s.name == new_session_name);
+                assert!(found, "New session should exist");
             }
         });
     }
@@ -332,34 +329,31 @@ mod window_tests {
 
             let panes = pane::available_panes().await.unwrap();
 
-            if let Some(win) = our_window {
-                let our_pane_ids = win.pane_ids();
-                let pane = panes.iter().find(|p| our_pane_ids.contains(&p.id));
+            if let Some(win) = our_window
+                && let Some(pane) = panes.iter().find(|p| win.pane_ids().contains(&p.id))
+            {
+                // Create a template window
+                let template_window = Window {
+                    id: WindowId::from_str("@0").unwrap(),
+                    index: 0,
+                    is_active: false,
+                    layout: String::new(),
+                    name: window_name.to_string(),
+                    sessions: vec![session_name.clone()],
+                };
 
-                if let Some(pane) = pane {
-                    // Create a template window
-                    let template_window = Window {
-                        id: WindowId::from_str("@0").unwrap(),
-                        index: 0,
-                        is_active: false,
-                        layout: String::new(),
-                        name: window_name.to_string(),
-                        sessions: vec![session_name.clone()],
-                    };
+                // Create new window
+                let result = window::new_window(session, &template_window, pane, None).await;
+                assert!(result.is_ok(), "Failed to create window: {:?}", result);
 
-                    // Create new window
-                    let result = window::new_window(session, &template_window, pane, None).await;
-                    assert!(result.is_ok(), "Failed to create window: {:?}", result);
+                let (win_id, pane_id) = result.unwrap();
+                assert!(win_id.as_str().starts_with('@'));
+                assert!(pane_id.as_str().starts_with('%'));
 
-                    let (win_id, pane_id) = result.unwrap();
-                    assert!(win_id.as_str().starts_with('@'));
-                    assert!(pane_id.as_str().starts_with('%'));
-
-                    // Verify window exists
-                    let windows = window::available_windows().await.unwrap();
-                    let found = windows.iter().any(|w| w.name == window_name);
-                    assert!(found, "New window should exist");
-                }
+                // Verify window exists
+                let windows = window::available_windows().await.unwrap();
+                let found = windows.iter().any(|w| w.name == window_name);
+                assert!(found, "New window should exist");
             }
         });
     }
@@ -480,24 +474,20 @@ mod pane_tests {
 
             let panes = pane::available_panes().await.unwrap();
 
-            if let Some(win) = our_window {
-                // Find a pane that belongs to our window
-                let our_pane_ids = win.pane_ids();
-                let our_pane = panes.iter().find(|p| our_pane_ids.contains(&p.id));
+            if let Some(win) = our_window
+                && let Some(p) = panes.iter().find(|p| win.pane_ids().contains(&p.id))
+            {
+                // Create new pane
+                let result = pane::new_pane(p, None, &win.id).await;
+                assert!(result.is_ok(), "Failed to create pane: {:?}", result);
 
-                if let Some(p) = our_pane {
-                    // Create new pane
-                    let result = pane::new_pane(p, None, &win.id).await;
-                    assert!(result.is_ok(), "Failed to create pane: {:?}", result);
+                let new_pane_id = result.unwrap();
+                assert!(new_pane_id.as_str().starts_with('%'));
 
-                    let new_pane_id = result.unwrap();
-                    assert!(new_pane_id.as_str().starts_with('%'));
-
-                    // Verify the new pane exists in the pane list
-                    let panes_after = pane::available_panes().await.unwrap();
-                    let found = panes_after.iter().any(|p| p.id == new_pane_id);
-                    assert!(found, "New pane {} should exist", new_pane_id);
-                }
+                // Verify the new pane exists in the pane list
+                let panes_after = pane::available_panes().await.unwrap();
+                let found = panes_after.iter().any(|p| p.id == new_pane_id);
+                assert!(found, "New pane {} should exist", new_pane_id);
             }
         });
     }
