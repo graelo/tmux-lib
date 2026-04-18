@@ -98,7 +98,7 @@ pub async fn show_option(option_name: &str, global: bool) -> Result<Option<Strin
     Ok(Some(buffer.to_string()))
 }
 
-/// Return all Tmux options as a `std::haosh::HashMap`.
+/// Return all Tmux options as a `HashMap`.
 pub async fn show_options(global: bool) -> Result<HashMap<String, String>> {
     let args = if global {
         vec!["show-options", "-g"]
@@ -111,7 +111,7 @@ pub async fn show_options(global: bool) -> Result<HashMap<String, String>> {
     let pairs: HashMap<String, String> = buffer
         .trim_end()
         .split('\n')
-        .map(|s| s.split_at(s.find(' ').unwrap()))
+        .filter_map(|s| s.split_once(' '))
         .map(|(k, v)| (k, v.trim_start()))
         .filter(|(_, v)| !v.is_empty() && v != &"''")
         .map(|(k, v)| (k.to_string(), v.to_string()))
