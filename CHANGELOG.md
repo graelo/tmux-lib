@@ -8,20 +8,32 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-18
+
 ### Changed
 
 - Bump MSRV 1.85 -> 1.95 and edition 2021 -> 2024
 - Replace custom `SliceExt` byte-slice trim with std `trim_ascii` (Rust 1.80)
 - Flatten nested `if let` with let chains (edition 2024)
-- Remove stale `#[allow(unused)]` on `quoted_string`
+- Extract `parse_options` for testability and remove dead code in
+  `default_command`
 - Harden CI workflows per security playbook
-- Switch dependency updates from Dependabot to Renovate
-- Adopt stricter clippy flags (`--all-targets --all-features`)
-- Add `ci/test_full.sh` with MSRV validation and cargo-nextest
+- Switch dependency updates from Dependabot to Renovate with automerge
+- Adopt cargo-nextest with `ci/test_full.sh` and MSRV validation
 - Add Linux ARM to CI test matrix
-- Pin poutine-action to release tag v1.1.4
-- Move poutine config to `.github/poutine.yml`
-- Switch Renovate schedule to daily
+
+### Fixed
+
+- Fix panic in `show_options` when tmux returns bare-flag options without
+  values
+
+### Added
+
+- Doc tests on all major public types (`PaneId`, `SessionId`, `WindowId`,
+  `Pane`, `Session`, `Window`, `parse_window_layout`, `cleanup_captured_buffer`)
+- Unit tests for `parse_options` and edge cases for `cleanup_captured_buffer`
+- `CHANGELOG.md` covering all releases
+- `#[must_use]` on `SessionId::as_str` and `WindowId::as_str`
 
 ## [0.4.2] - 2025-12-19
 
