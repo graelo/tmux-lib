@@ -4,14 +4,14 @@ use std::fmt;
 use std::str::FromStr;
 
 use nom::{
+    IResult, Parser,
     character::complete::{char, digit1},
     combinator::all_consuming,
     sequence::preceded,
-    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::error::{map_add_intent, Error};
+use crate::error::{Error, map_add_intent};
 
 /// The id of a Tmux pane.
 ///
@@ -56,7 +56,7 @@ impl fmt::Display for PaneId {
 }
 
 pub(crate) mod parse {
-    use super::{char, digit1, preceded, IResult, PaneId, Parser};
+    use super::{IResult, PaneId, Parser, char, digit1, preceded};
 
     pub(crate) fn pane_id(input: &str) -> IResult<&str, PaneId> {
         let (input, digit) = preceded(char('%'), digit1).parse(input)?;

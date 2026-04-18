@@ -2,11 +2,11 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use smol::{future, process::Command, Timer};
+use smol::{Timer, future, process::Command};
 
 use crate::{
-    error::{check_empty_process_output, Error},
     Result,
+    error::{Error, check_empty_process_output},
 };
 
 /// Maximum time to wait for the server to become ready.

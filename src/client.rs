@@ -2,14 +2,14 @@
 
 use std::str::FromStr;
 
-use nom::{character::complete::char, combinator::all_consuming, Parser};
+use nom::{Parser, character::complete::char, combinator::all_consuming};
 use serde::{Deserialize, Serialize};
 use smol::process::Command;
 
 use crate::{
-    error::{map_add_intent, Error},
-    parse::{quoted_nonempty_string, quoted_string},
     Result,
+    error::{Error, map_add_intent},
+    parse::{quoted_nonempty_string, quoted_string},
 };
 
 /// A Tmux client.

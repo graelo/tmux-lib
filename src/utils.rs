@@ -1,49 +1,8 @@
-/// Misc utilities.
-pub trait SliceExt {
-    fn trim(&self) -> &Self;
-    fn trim_trailing(&self) -> &Self;
-}
-
-fn is_whitespace(c: &u8) -> bool {
-    *c == b'\t' || *c == b' '
-}
-
-fn is_not_whitespace(c: &u8) -> bool {
-    !is_whitespace(c)
-}
-
-impl SliceExt for [u8] {
-    /// Trim leading and trailing whitespaces (`\t` and ` `) in a `&[u8]`
-    fn trim(&self) -> &[u8] {
-        if let Some(first) = self.iter().position(is_not_whitespace) {
-            if let Some(last) = self.iter().rposition(is_not_whitespace) {
-                &self[first..last + 1]
-            } else {
-                unreachable!();
-            }
-        } else {
-            &[]
-        }
-    }
-
-    /// Trim trailing whitespaces (`\t` and ` `) in a `&[u8]`
-    fn trim_trailing(&self) -> &[u8] {
-        if let Some(last) = self.iter().rposition(is_not_whitespace) {
-            &self[0..last + 1]
-        } else {
-            &[]
-        }
-    }
-}
-
 /// Trim each line of the buffer.
 fn buf_trim_trailing(buf: &[u8]) -> Vec<&[u8]> {
-    let trimmed_lines: Vec<&[u8]> = buf
-        .split(|c| *c == b'\n')
-        .map(SliceExt::trim_trailing) // trim each line
-        .collect();
-
-    trimmed_lines
+    buf.split(|c| *c == b'\n')
+        .map(|line| line.trim_ascii_end())
+        .collect()
 }
 
 /// Drop all the last empty lines.
@@ -90,14 +49,14 @@ pub fn cleanup_captured_buffer(buffer: &[u8], drop_n_last_lines: usize) -> Vec<u
 
 #[cfg(test)]
 mod tests {
-    use super::{buf_trim_trailing, cleanup_captured_buffer, drop_last_empty_lines, SliceExt};
+    use super::{buf_trim_trailing, cleanup_captured_buffer, drop_last_empty_lines};
 
     #[test]
     fn trims_trailing_whitespaces() {
         let input = "  text   ".as_bytes();
         let expected = "  text".as_bytes();
 
-        let actual = input.trim_trailing();
+        let actual = input.trim_ascii_end();
         assert_eq!(actual, expected);
     }
 
@@ -106,7 +65,7 @@ mod tests {
         let input = "  text   ".as_bytes();
         let expected = "text".as_bytes();
 
-        let actual = input.trim();
+        let actual = input.trim_ascii();
         assert_eq!(actual, expected);
     }
 
@@ -140,22 +99,22 @@ mod tests {
     #[test]
     fn test_trim_only_whitespace() {
         let input = "   \t  ".as_bytes();
-        assert_eq!(input.trim(), &[]);
-        assert_eq!(input.trim_trailing(), &[]);
+        assert_eq!(input.trim_ascii(), &[]);
+        assert_eq!(input.trim_ascii_end(), &[]);
     }
 
     #[test]
     fn test_trim_empty() {
         let input = "".as_bytes();
-        assert_eq!(input.trim(), &[]);
-        assert_eq!(input.trim_trailing(), &[]);
+        assert_eq!(input.trim_ascii(), &[]);
+        assert_eq!(input.trim_ascii_end(), &[]);
     }
 
     #[test]
     fn test_trim_tabs() {
         let input = "\t\ttext\t\t".as_bytes();
-        assert_eq!(input.trim(), "text".as_bytes());
-        assert_eq!(input.trim_trailing(), "\t\ttext".as_bytes());
+        assert_eq!(input.trim_ascii(), "text".as_bytes());
+        assert_eq!(input.trim_ascii_end(), "\t\ttext".as_bytes());
     }
 
     #[test]

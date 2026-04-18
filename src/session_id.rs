@@ -3,14 +3,14 @@
 use std::str::FromStr;
 
 use nom::{
+    IResult, Parser,
     character::complete::{char, digit1},
     combinator::all_consuming,
     sequence::preceded,
-    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::error::{map_add_intent, Error};
+use crate::error::{Error, map_add_intent};
 
 /// The id of a Tmux session.
 ///

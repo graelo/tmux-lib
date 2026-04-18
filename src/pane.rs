@@ -7,19 +7,19 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use nom::{
+    IResult, Parser,
     character::complete::{char, digit1, not_line_ending},
     combinator::{all_consuming, map_res},
-    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 use smol::process::Command;
 
 use crate::{
-    error::{check_empty_process_output, check_process_success, map_add_intent, Error},
-    pane_id::{parse::pane_id, PaneId},
+    Result,
+    error::{Error, check_empty_process_output, check_process_success, map_add_intent},
+    pane_id::{PaneId, parse::pane_id},
     parse::{boolean, quoted_nonempty_string, quoted_string},
     window_id::WindowId,
-    Result,
 };
 
 /// A Tmux pane.
