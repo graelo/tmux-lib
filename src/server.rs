@@ -108,16 +108,23 @@ pub async fn show_options(global: bool) -> Result<HashMap<String, String>> {
 
     let output = Command::new("tmux").args(&args).output().await?;
     let buffer = String::from_utf8(output.stdout)?;
-    let pairs: HashMap<String, String> = buffer
+
+    Ok(parse_options(&buffer))
+}
+
+/// Parse the output of `tmux show-options` into a `HashMap`.
+///
+/// Lines without a space (bare flags) are skipped. Values that are empty or
+/// equal to `''` are filtered out.
+fn parse_options(buffer: &str) -> HashMap<String, String> {
+    buffer
         .trim_end()
         .split('\n')
         .filter_map(|s| s.split_once(' '))
         .map(|(k, v)| (k, v.trim_start()))
         .filter(|(_, v)| !v.is_empty() && v != &"''")
         .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-
-    Ok(pairs)
+        .collect()
 }
 
 /// Return the `"default-command"` used to start a pane, falling back to `"default shell"` if none.
@@ -140,14 +147,65 @@ pub async fn default_command() -> Result<String> {
 
     all_options
         .get("default-command")
-        // .map(|cmd| {
-        //     if cmd.trim_end() == "''" {
-        //         &default_shell
-        //     } else {
-        //         cmd
-        //     }
-        // })
         .or(Some(&default_shell))
         .ok_or(Error::TmuxConfig("no default-command nor default-shell"))
         .map(|cmd| cmd.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_options;
+
+    #[test]
+    fn parse_options_typical_output() {
+        let input = "default-shell /bin/zsh\nstatus on\nhistory-limit 10000\n";
+        let opts = parse_options(input);
+
+        assert_eq!(opts.get("default-shell").unwrap(), "/bin/zsh");
+        assert_eq!(opts.get("status").unwrap(), "on");
+        assert_eq!(opts.get("history-limit").unwrap(), "10000");
+    }
+
+    #[test]
+    fn parse_options_skips_bare_flags() {
+        let input = "destroy-unattached\ndefault-shell /bin/zsh\nsilence-action\n";
+        let opts = parse_options(input);
+
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts.get("default-shell").unwrap(), "/bin/zsh");
+        assert!(!opts.contains_key("destroy-unattached"));
+        assert!(!opts.contains_key("silence-action"));
+    }
+
+    #[test]
+    fn parse_options_filters_empty_values() {
+        let input = "default-command ''\ndefault-shell /bin/zsh\n";
+        let opts = parse_options(input);
+
+        assert!(!opts.contains_key("default-command"));
+        assert_eq!(opts.get("default-shell").unwrap(), "/bin/zsh");
+    }
+
+    #[test]
+    fn parse_options_empty_input() {
+        let opts = parse_options("");
+        assert!(opts.is_empty());
+    }
+
+    #[test]
+    fn parse_options_value_with_spaces() {
+        let input = "status-left [#S] #H\nstatus on\n";
+        let opts = parse_options(input);
+
+        assert_eq!(opts.get("status-left").unwrap(), "[#S] #H");
+        assert_eq!(opts.get("status").unwrap(), "on");
+    }
+
+    #[test]
+    fn parse_options_trims_spaces_between_key_and_value() {
+        let input = "key   value-with-extra-spaces\n";
+        let opts = parse_options(input);
+
+        assert_eq!(opts.get("key").unwrap(), "value-with-extra-spaces");
+    }
 }

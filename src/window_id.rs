@@ -15,6 +15,14 @@ use crate::error::{Error, map_add_intent};
 /// The id of a Tmux window.
 ///
 /// This wraps the raw tmux representation (`@41`).
+///
+/// ```
+/// use std::str::FromStr;
+/// use tmux_lib::window_id::WindowId;
+///
+/// let id = WindowId::from_str("@10").unwrap();
+/// assert_eq!(id.as_str(), "@10");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowId(String);
 
@@ -37,6 +45,7 @@ impl FromStr for WindowId {
 
 impl WindowId {
     /// Extract a string slice containing the raw representation.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }

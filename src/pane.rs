@@ -23,6 +23,19 @@ use crate::{
 };
 
 /// A Tmux pane.
+///
+/// ```
+/// use std::str::FromStr;
+/// use tmux_lib::pane::Pane;
+///
+/// let line = "%20:0:false:'rmbp':'nvim':/Users/graelo/code/rust/tmux-backup";
+/// let pane = Pane::from_str(line).unwrap();
+///
+/// assert_eq!(pane.id.as_str(), "%20");
+/// assert_eq!(pane.index, 0);
+/// assert!(!pane.is_active);
+/// assert_eq!(pane.command, "nvim");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pane {
     /// Pane identifier, e.g. `%37`.

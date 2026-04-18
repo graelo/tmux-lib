@@ -14,16 +14,26 @@ fn drop_last_empty_lines<'a>(lines: &[&'a [u8]]) -> Vec<&'a [u8]> {
     }
 }
 
-/// This function processes a pane captured bufer.
+/// Process a pane captured buffer.
 ///
 /// - All lines are trimmed after capture because tmux does not allow capturing escape codes and
 ///   trimming lines.
-/// - If `drop_n_last_lines` is greater than 0, the n last line are not captured. This is used only
+/// - If `drop_n_last_lines` is greater than 0, the n last lines are not captured. This is used only
 ///   for panes with a zsh prompt, in order to avoid polluting the history with new prompts on
 ///   restore.
 /// - In addition, the last line has an additional ascii reset escape code because tmux does not
 ///   capture it.
 ///
+/// ```
+/// use tmux_lib::utils::cleanup_captured_buffer;
+///
+/// let buffer = b"line1  \nline2\t\n\n\n";
+/// let result = cleanup_captured_buffer(buffer, 0);
+/// let output = String::from_utf8(result).unwrap();
+///
+/// // trailing whitespace trimmed, empty trailing lines dropped, reset code appended
+/// assert_eq!(output, "line1\nline2\x1b[0m\n");
+/// ```
 pub fn cleanup_captured_buffer(buffer: &[u8], drop_n_last_lines: usize) -> Vec<u8> {
     let trimmed_lines: Vec<&[u8]> = buf_trim_trailing(buffer);
     let mut buffer: Vec<&[u8]> = drop_last_empty_lines(&trimmed_lines);
@@ -194,5 +204,37 @@ mod tests {
         let lines: Vec<&[u8]> = vec![b"a", b"b", b"c"];
         let result = drop_last_empty_lines(&lines);
         assert_eq!(result, lines);
+    }
+
+    #[test]
+    fn test_cleanup_captured_buffer_tabs_are_trimmed() {
+        let input = "line1\t\t\nline2\t\n";
+        let result = cleanup_captured_buffer(input.as_bytes(), 0);
+        let result_str = String::from_utf8(result).unwrap();
+        assert_eq!(result_str, "line1\nline2\u{001b}[0m\n");
+    }
+
+    #[test]
+    fn test_cleanup_captured_buffer_mixed_trailing_whitespace() {
+        let input = "line1 \t \nline2\t  \t\n";
+        let result = cleanup_captured_buffer(input.as_bytes(), 0);
+        let result_str = String::from_utf8(result).unwrap();
+        assert_eq!(result_str, "line1\nline2\u{001b}[0m\n");
+    }
+
+    #[test]
+    fn test_cleanup_captured_buffer_no_trailing_newline() {
+        let input = "line1\nline2";
+        let result = cleanup_captured_buffer(input.as_bytes(), 0);
+        let result_str = String::from_utf8(result).unwrap();
+        assert_eq!(result_str, "line1\nline2\u{001b}[0m\n");
+    }
+
+    #[test]
+    fn test_buf_trim_trailing_preserves_leading_whitespace() {
+        let text = "  indented\n\tnested\n";
+        let actual = buf_trim_trailing(text.as_bytes());
+        assert_eq!(actual[0], "  indented".as_bytes());
+        assert_eq!(actual[1], "\tnested".as_bytes());
     }
 }
