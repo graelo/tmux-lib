@@ -54,7 +54,12 @@ jobs:
 
       - name: Quality - cargo clippy
         run: |
-          cargo clippy -- -D warnings
+          cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@58e862542551f667fa44c8a2a4a1d64ad477c96a # v2.75.17
+        with:
+          tool: cargo-nextest@0.9.133
 
       - name: Build (dev)
         run: cargo build --all-features
@@ -63,11 +68,11 @@ jobs:
         run: cargo build --all-features --release
 
       - name: Test
-        run: cargo test --all-features
+        run: ./ci/test_full.sh
 
   test-other-platforms:
     name: Tests on
-    runs-on: '${{ matrix.os }}'
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     strategy:
@@ -75,6 +80,10 @@ jobs:
         include:
           - os: macos-15-intel
             target: x86_64-apple-darwin
+            type: unix
+            toolchain: stable
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
             type: unix
             toolchain: stable
           - os: macos-latest
@@ -86,7 +95,7 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: ${{ matrix.toolchain }}
-          target: ${{ matrix.target }}
+          targets: ${{ matrix.target }}
           components: rustfmt, clippy
 
       - name: Checkout
@@ -104,12 +113,22 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ matrix.toolchain }}-${{ hashFiles('Cargo.toml') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ matrix.toolchain }}-hash-${{ hashFiles('Cargo.toml') }}
 
       - name: Install tmux
         run: |
-          brew install tmux
+          if command -v brew &>/dev/null; then
+            brew install tmux
+          else
+            sudo apt-get update
+            sudo apt-get install -y tmux
+          fi
           tmux -V
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@58e862542551f667fa44c8a2a4a1d64ad477c96a # v2.75.17
+        with:
+          tool: cargo-nextest@0.9.133
 
       - name: Build (dev)
         run: cargo build --all-features
@@ -118,4 +137,4 @@ jobs:
         run: cargo build --all-features --release
 
       - name: Test
-        run: cargo test --all-features
+        run: ./ci/test_full.sh
