@@ -44,7 +44,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ matrix.rust }}-hash-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.rust }}-hash-${{ hashFiles('Cargo.toml') }}
 
       - name: Install tmux
         run: |
@@ -58,7 +58,7 @@ jobs:
 
       - name: Quality - cargo clippy
         run: |
-          cargo clippy -- -D warnings
+          cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Quality - convco check
         run: |
@@ -70,23 +70,10 @@ jobs:
           ./convco check -c .convco
           rm convco
 
-      - name: Quality - cargo outdated
-        timeout-minutes: 20
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION=$(gh api repos/kbknapp/cargo-outdated/releases/latest --jq '.tag_name')
-          curl -sSfL "https://github.com/kbknapp/cargo-outdated/releases/download/${VERSION}/cargo-outdated-${VERSION#v}-x86_64-unknown-linux-musl.tar.gz" | \
-            tar zx
-          chmod +x cargo-outdated
-          mv cargo-outdated ~/.cargo/bin/
-          rm -rf ~/.cargo/advisory-db
-          cargo outdated --exit-code 1
-
-      # - name: Quality - cargo udeps (needs nightly)
-      #   run: |
-      #     cargo install --locked cargo-udeps || true
-      #     cargo udeps
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@58e862542551f667fa44c8a2a4a1d64ad477c96a # v2.75.17
+        with:
+          tool: cargo-nextest@0.9.133
 
       - name: Build (dev)
         run: cargo build --all-features
@@ -95,7 +82,7 @@ jobs:
         run: cargo build --all-features --release
 
       - name: Test
-        run: cargo test --all-features
+        run: ./ci/test_full.sh
 
   changes:
     name: Detect changes
@@ -119,7 +106,7 @@ jobs:
             workflows:
               - '.github/workflows/**'
               - '.github/actions/**'
-              - '.poutine.yml'
+              - '.github/poutine.yml'
               - '.github/zizmor.yml'
               - 'renovate.json'
 
