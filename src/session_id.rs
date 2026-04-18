@@ -15,6 +15,14 @@ use crate::error::{Error, map_add_intent};
 /// The id of a Tmux session.
 ///
 /// This wraps the raw tmux representation (`$11`).
+///
+/// ```
+/// use std::str::FromStr;
+/// use tmux_lib::session_id::SessionId;
+///
+/// let id = SessionId::from_str("$3").unwrap();
+/// assert_eq!(id.as_str(), "$3");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionId(String);
 
@@ -36,6 +44,8 @@ impl FromStr for SessionId {
 }
 
 impl SessionId {
+    /// Extract a string slice containing the raw representation.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }

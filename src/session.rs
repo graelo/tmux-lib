@@ -25,6 +25,17 @@ use crate::{
 };
 
 /// A Tmux session.
+///
+/// ```
+/// use std::str::FromStr;
+/// use tmux_lib::session::Session;
+///
+/// let line = "$1:'pytorch':/Users/graelo/ml/pytorch";
+/// let session = Session::from_str(line).unwrap();
+///
+/// assert_eq!(session.id.as_str(), "$1");
+/// assert_eq!(session.name, "pytorch");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     /// Session identifier, e.g. `$3`.

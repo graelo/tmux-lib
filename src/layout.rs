@@ -118,6 +118,13 @@ impl Split {
 }
 
 /// Parse the Tmux layout string description and return the pane-ids.
+///
+/// ```
+/// use tmux_lib::layout::parse_window_layout;
+///
+/// let layout = parse_window_layout("9e8b,334x85,0,0{167x85,0,0,8,166x85,168,0,9}").unwrap();
+/// assert_eq!(layout.pane_ids(), vec![8, 9]);
+/// ```
 pub fn parse_window_layout(input: &str) -> Result<WindowLayout> {
     let desc = "window-layout";
     let intent = "window-layout";

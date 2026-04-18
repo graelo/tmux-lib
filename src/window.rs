@@ -25,6 +25,19 @@ use crate::{
 };
 
 /// A Tmux window.
+///
+/// ```
+/// use std::str::FromStr;
+/// use tmux_lib::window::Window;
+///
+/// let line = "@5:0:true:64f0,334x85,0,0,11:'ben':'rust'";
+/// let window = Window::from_str(line).unwrap();
+///
+/// assert_eq!(window.id.as_str(), "@5");
+/// assert_eq!(window.index, 0);
+/// assert!(window.is_active);
+/// assert_eq!(window.name, "ben");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Window {
     /// Window identifier, e.g. `@3`.

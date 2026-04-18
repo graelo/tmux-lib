@@ -16,6 +16,18 @@ use crate::error::{Error, map_add_intent};
 /// The id of a Tmux pane.
 ///
 /// This wraps the raw tmux representation (`%12`).
+///
+/// ```
+/// use std::str::FromStr;
+/// use tmux_lib::pane_id::PaneId;
+///
+/// let id = PaneId::from_str("%42").unwrap();
+/// assert_eq!(id.as_str(), "%42");
+///
+/// // Can also be created from a u16
+/// let id = PaneId::from(&7u16);
+/// assert_eq!(id.as_str(), "%7");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PaneId(pub String);
 
