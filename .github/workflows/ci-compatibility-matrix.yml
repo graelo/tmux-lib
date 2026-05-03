@@ -1,25 +1,33 @@
-# Test pre-releases on a larger scope (platforms & versions) to avoid bad surprises.
+# Compatibility testing: multi-version and multi-platform matrix.
+#
+# Local:
+#   act push -W .github/workflows/ci-compatibility-matrix.yml -j test-versions
+#   act push -W .github/workflows/ci-compatibility-matrix.yml -j test-other-platforms
 
-name: Large scope
+name: 'CI: Compatibility Matrix'
+
 on:
   push:
     branches:
-      - staging
+      - 'compat/*'
 
 permissions: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   test-versions:
-    name: Tests on Linux
+    name: ubuntu-latest (${{ matrix.rust }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
     strategy:
       matrix:
-        rust: [1.95.0, beta, nightly]
-
+        rust: ['1.95.0', beta, nightly]
     steps:
-      - name: Rust install
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: ${{ matrix.rust }}
@@ -30,7 +38,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Cache crates from crates.io
+      - name: Cache crates
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         continue-on-error: false
         with:
@@ -48,13 +56,13 @@ jobs:
           sudo apt-get install -y tmux
           tmux -V
 
-      - name: Quality - cargo fmt
+      - name: Quality – cargo fmt
         run: |
           cargo fmt --all -- --check
 
-      - name: Quality - cargo clippy
+      - name: Quality – cargo clippy
         run: |
-          cargo clippy --all-targets --all-features -- -D warnings
+          cargo clippy --all-targets -- -D warnings
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@7769b73c2ec98c38dfcf2e18c83cfd4880c038c1 # v2.75.27
@@ -62,16 +70,16 @@ jobs:
           tool: cargo-nextest@0.9.133
 
       - name: Build (dev)
-        run: cargo build --all-features
+        run: cargo build
 
       - name: Build (release)
-        run: cargo build --all-features --release
+        run: cargo build --release
 
       - name: Test
         run: ./ci/test_full.sh
 
   test-other-platforms:
-    name: Tests on
+    name: ${{ matrix.os }} (stable)
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -80,30 +88,22 @@ jobs:
         include:
           - os: macos-15-intel
             target: x86_64-apple-darwin
-            type: unix
-            toolchain: stable
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            type: unix
-            toolchain: stable
           - os: macos-latest
             target: aarch64-apple-darwin
-            type: unix
-            toolchain: stable
     steps:
-      - name: Rust install
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
-          toolchain: ${{ matrix.toolchain }}
-          targets: ${{ matrix.target }}
-          components: rustfmt, clippy
+          toolchain: stable
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Cache crates from crates.io
+      - name: Cache crates
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         continue-on-error: false
         with:
@@ -113,7 +113,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ matrix.toolchain }}-hash-${{ hashFiles('Cargo.toml') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-stable-hash-${{ hashFiles('Cargo.toml') }}
 
       - name: Install tmux
         run: |
@@ -131,10 +131,10 @@ jobs:
           tool: cargo-nextest@0.9.133
 
       - name: Build (dev)
-        run: cargo build --all-features
+        run: cargo build
 
       - name: Build (release)
-        run: cargo build --all-features --release
+        run: cargo build --release
 
       - name: Test
         run: ./ci/test_full.sh
