@@ -1,3 +1,8 @@
+# Tag-triggered release: generate changelog and publish a GitHub release.
+#
+# Local:
+#   act push -W .github/workflows/release.yml -j release
+
 name: Release
 on:
   push:
@@ -6,34 +11,37 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   release:
-    name: Create a GitHub Release
-    # if: github.ref == 'refs/heads/main'
+    name: Publish release
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: checkout
+      - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # convco needs all history to create the changelog
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Download convco
+      - name: Install convco
         run: |
           git show-ref
           curl -sSfLO https://github.com/convco/convco/releases/latest/download/convco-ubuntu.zip
           unzip convco-ubuntu.zip
           chmod +x convco
 
-      - name: Use convco to create the changelog
+      - name: Generate changelog
         run: |
           ./convco changelog -c .convco --max-versions 1 --include-hidden-sections > CHANGELOG.md
           rm convco convco-ubuntu.zip
 
-      - name: Create GitHub Release
+      - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
