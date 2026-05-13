@@ -19,6 +19,7 @@ jobs:
   release:
     name: Publish release
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:
