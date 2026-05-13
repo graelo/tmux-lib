@@ -34,13 +34,9 @@ fi
 
 set -x
 
-# test the default
+# test the default build (crate has no [features] table)
 cargo build
 cargo nextest run $NEXTEST_PROFILE
-
-# test all features
-cargo build --all-features
-cargo nextest run $NEXTEST_PROFILE --all-features
 
 # doc tests (not supported by nextest)
 cargo test --doc
