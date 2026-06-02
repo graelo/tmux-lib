@@ -32,7 +32,6 @@ jobs:
 
       - name: Install convco
         run: |
-          git show-ref
           curl -sSfLO https://github.com/convco/convco/releases/latest/download/convco-ubuntu.zip
           unzip convco-ubuntu.zip
           chmod +x convco
