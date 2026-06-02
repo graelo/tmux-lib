@@ -22,6 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    defaults:
+      run:
+        shell: bash
     strategy:
       matrix:
         rust: ['1.95.0', beta, nightly]
@@ -42,7 +45,6 @@ jobs:
         continue-on-error: false
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
@@ -63,16 +65,16 @@ jobs:
         run: |
           cargo clippy --all-targets -- -D warnings
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@c070f87102a1c75b3183910f391c1cb887fe13c8 # v2.77.6
-        with:
-          tool: cargo-nextest@0.9.133
-
       - name: Build (dev)
         run: cargo build
 
       - name: Build (release)
         run: cargo build --release
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@c070f87102a1c75b3183910f391c1cb887fe13c8 # v2.77.6
+        with:
+          tool: cargo-nextest@0.9.133
 
       - name: Test
         run: ./ci/test_full.sh
@@ -115,7 +117,6 @@ jobs:
         continue-on-error: false
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
@@ -132,16 +133,16 @@ jobs:
           fi
           tmux -V
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@c070f87102a1c75b3183910f391c1cb887fe13c8 # v2.77.6
-        with:
-          tool: cargo-nextest@0.9.133
-
       - name: Build (dev)
         run: cargo build
 
       - name: Build (release)
         run: cargo build --release
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@c070f87102a1c75b3183910f391c1cb887fe13c8 # v2.77.6
+        with:
+          tool: cargo-nextest@0.9.133
 
       - name: Test
         run: ./ci/test_full.sh
