@@ -8,6 +8,20 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- A `Makefile` defines canonical local verification tasks, with `make check`
+  as the pre-push gate and `make check-all` as the pre-PR gate
+- `rumdl.toml` applies consistent Markdown linting and formatting rules
+- `AGENTS.md` documents the project architecture, verification, and release
+  conventions for coding agents
+
+### Changed
+
+- Make `README.md` the canonical crate overview and remove its
+  `cargo-sync-readme` markers
+- Reduce crate-level Rust documentation to a link to the project README
+
 ## [0.5.0] - 2026-04-18
 
 ### Changed
