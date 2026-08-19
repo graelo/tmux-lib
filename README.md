@@ -5,15 +5,13 @@
 [![minimum rustc 1.95](https://img.shields.io/badge/rustc-1.95+-red.svg)](https://rust-lang.github.io/rfcs/2495-min-rust-version.html)
 [![build status](https://github.com/graelo/tmux-lib/actions/workflows/ci-essentials.yml/badge.svg)](https://github.com/graelo/tmux-lib/actions)
 
-<!-- cargo-sync-readme start -->
-
-Read or manipulate Tmux.
+Read or manipulate tmux.
 
 Version requirement: _rustc 1.95.0+_
 
 ```toml
 [dependencies]
-tmux-lib = "0.3"
+tmux-lib = "0.5"
 ```
 
 ## Getting started
@@ -23,6 +21,12 @@ Work in progress
 ## Caveats
 
 - This is a beta version
+
+## Development
+
+For local verification, read the [`Makefile`](Makefile) for the canonical task
+definitions, or run `make help` to list them: run `make check` before pushing
+and `make check-all` before opening a pull request.
 
 ## License
 
@@ -41,5 +45,3 @@ Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the Apache-2.0
 license, shall be dual licensed as above, without any additional terms or
 conditions.
-
-<!-- cargo-sync-readme end -->
