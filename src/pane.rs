@@ -16,11 +16,21 @@ use smol::process::Command;
 
 use crate::{
     Result,
-    error::{Error, check_empty_process_output, check_process_success, map_add_intent},
+    error::{
+        Error, check_empty_process_output, check_process_success, map_add_intent,
+        map_byte_parse_error,
+    },
     pane_id::{PaneId, parse::pane_id},
-    parse::{boolean, quoted_nonempty_string, quoted_string},
+    parse::{
+        ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, boolean, looks_like_framed,
+        quoted_nonempty_string, quoted_string,
+    },
     window_id::WindowId,
 };
+
+/// Format used by [`available_panes`] for one pane per newline-terminated record.
+const PANE_LIST_FORMAT: &str = "#{pane_id}\x1f#{pane_index}\x1f#{?pane_active,true,false}\x1f#{n:pane_title}\x1f#{pane_title}\x1f#{n:pane_current_command}\x1f#{pane_current_command}\x1f#{n:pane_current_path}\x1f#{pane_current_path}";
+const PANE_LIST_INTENT: &str = "#{pane_id}\\x1f#{pane_index}\\x1f#{?pane_active,true,false}\\x1f#{n:pane_title}\\x1f#{pane_title}\\x1f#{n:pane_current_command}\\x1f#{pane_current_command}\\x1f#{n:pane_current_path}\\x1f#{pane_current_path}\\n";
 
 /// A Tmux pane.
 ///
@@ -28,7 +38,7 @@ use crate::{
 /// use std::str::FromStr;
 /// use tmux_lib::pane::Pane;
 ///
-/// let line = "%20:0:false:'rmbp':'nvim':/Users/graelo/code/rust/tmux-backup";
+/// let line = "%20\x1f0\x1ffalse\x1f4\x1frmbp\x1f4\x1fnvim\x1f35\x1f/Users/graelo/code/rust/tmux-backup\n";
 /// let pane = Pane::from_str(line).unwrap();
 ///
 /// assert_eq!(pane.id.as_str(), "%20");
@@ -60,30 +70,34 @@ impl FromStr for Pane {
     /// This returns a `Result<Pane, Error>` as this call can obviously
     /// fail if provided an invalid format.
     ///
-    /// The expected format of the tmux status is
+    /// The preferred format is a byte-framed, newline-terminated record:
     ///
     /// ```text
-    /// %20:0:false:'rmbp':'nvim':/Users/graelo/code/rust/tmux-backup
-    /// %21:1:true:'rmbp':'tmux':/Users/graelo/code/rust/tmux-backup
-    /// %27:2:false:'rmbp':'man man':/Users/graelo/code/rust/tmux-backup
+    /// #{pane_id}\x1f#{pane_index}\x1f#{?pane_active,true,false}\x1f#{n:pane_title}\x1f#{pane_title}\x1f#{n:pane_current_command}\x1f#{pane_current_command}\x1f#{n:pane_current_path}\x1f#{pane_current_path}\n
     /// ```
     ///
-    /// This status line is obtained with
+    /// `#{n:...}` is a byte length, and `\x1f` is Unit Separator. Data fields
+    /// are therefore allowed to contain either delimiter or newline. The
+    /// legacy quote-delimited format is also accepted for compatibility.
+    /// The framed status is obtained with
     ///
     /// ```text
-    /// tmux list-panes -F "#{pane_id}:#{pane_index}:#{?pane_active,true,false}:'#{pane_title}':'#{pane_current_command}':#{pane_current_path}"
+    /// tmux list-panes -a -F "#{pane_id}\x1f#{pane_index}\x1f#{?pane_active,true,false}\x1f#{n:pane_title}\x1f#{pane_title}\x1f#{n:pane_current_command}\x1f#{pane_current_command}\x1f#{n:pane_current_path}\x1f#{pane_current_path}"
     /// ```
     ///
     /// For definitions, look at `Pane` type and the tmux man page for
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
         let desc = "Pane";
-        let intent = "##{pane_id}:##{pane_index}:##{?pane_active,true,false}:'##{pane_title}':'##{pane_current_command}':##{pane_current_path}";
+        if looks_like_framed(input.as_bytes()) {
+            return parse::framed_pane(input.as_bytes())
+                .map_err(|e| map_byte_parse_error(desc, PANE_LIST_INTENT, e));
+        }
 
-        let (_, pane) = all_consuming(parse::pane)
+        let intent = "##{pane_id}:##{pane_index}:##{?pane_active,true,false}:'##{pane_title}':'##{pane_current_command}':##{pane_current_path}";
+        let (_, pane) = all_consuming(parse::legacy_pane)
             .parse(input)
             .map_err(|e| map_add_intent(desc, intent, e))?;
-
         Ok(pane)
     }
 }
@@ -119,7 +133,7 @@ impl Pane {
 pub(crate) mod parse {
     use super::*;
 
-    pub(crate) fn pane(input: &str) -> IResult<&str, Pane> {
+    pub(super) fn legacy_pane(input: &str) -> IResult<&str, Pane> {
         let (input, (id, _, index, _, is_active, _, title, _, command, _, dirpath)) = (
             pane_id,
             char(':'),
@@ -147,6 +161,62 @@ pub(crate) mod parse {
             },
         ))
     }
+
+    pub(super) fn framed_pane(input: &[u8]) -> std::result::Result<Pane, ByteParseError> {
+        let mut cursor = ByteCursor::new(input);
+        let pane = framed_pane_record(&mut cursor)?;
+        if !cursor.is_at_end() {
+            return Err(ByteParseError::new(
+                "unexpected trailing bytes after pane record",
+            ));
+        }
+        Ok(pane)
+    }
+
+    pub(super) fn framed_panes(input: &[u8]) -> crate::Result<Vec<Pane>> {
+        let mut cursor = ByteCursor::new(input);
+        let mut panes = Vec::new();
+        while !cursor.is_at_end() {
+            panes.push(
+                framed_pane_record(&mut cursor)
+                    .map_err(|e| map_byte_parse_error("Pane", PANE_LIST_INTENT, e))?,
+            );
+        }
+        Ok(panes)
+    }
+
+    fn framed_pane_record(
+        cursor: &mut ByteCursor<'_>,
+    ) -> std::result::Result<Pane, ByteParseError> {
+        let id = cursor
+            .take_token_str("pane ID")?
+            .parse()
+            .map_err(|_| ByteParseError::new("invalid pane ID"))?;
+        let index = cursor
+            .take_token_str("pane index")?
+            .parse()
+            .map_err(|_| ByteParseError::new("invalid pane index"))?;
+        let is_active = match cursor.take_token_str("pane active flag")? {
+            "true" => true,
+            "false" => false,
+            _ => return Err(ByteParseError::new("invalid pane active flag")),
+        };
+        let title = cursor.take_length_prefixed_string(FIELD_SEPARATOR, "pane title")?;
+        let command = cursor.take_length_prefixed_string(FIELD_SEPARATOR, "pane command")?;
+        if command.is_empty() {
+            return Err(ByteParseError::new("pane command is empty"));
+        }
+        let dirpath = cursor.take_length_prefixed_string(RECORD_SEPARATOR, "pane path")?;
+
+        Ok(Pane {
+            id,
+            index,
+            is_active,
+            title,
+            dirpath: dirpath.into(),
+            command,
+        })
+    }
 }
 
 // ------------------------------
@@ -155,30 +225,11 @@ pub(crate) mod parse {
 
 /// Return a list of all `Pane` from all sessions.
 pub async fn available_panes() -> Result<Vec<Pane>> {
-    let args = vec![
-        "list-panes",
-        "-a",
-        "-F",
-        "#{pane_id}\
-        :#{pane_index}\
-        :#{?pane_active,true,false}\
-        :'#{pane_title}'\
-        :'#{pane_current_command}'\
-        :#{pane_current_path}",
-    ];
+    let args = vec!["list-panes", "-a", "-F", PANE_LIST_FORMAT];
 
     let output = Command::new("tmux").args(&args).output().await?;
-    let buffer = String::from_utf8(output.stdout)?;
-
-    // Each call to `Pane::parse` returns a `Result<Pane, _>`. All results
-    // are collected into a Result<Vec<Pane>, _>, thanks to `collect()`.
-    let result: Result<Vec<Pane>> = buffer
-        .trim_end() // trim last '\n' as it would create an empty line
-        .split('\n')
-        .map(Pane::from_str)
-        .collect();
-
-    result
+    check_process_success(&output, "list-panes")?;
+    parse::framed_panes(&output.stdout)
 }
 
 /// Create a new pane (horizontal split) in the window with `window_id`, and return the new
@@ -227,6 +278,8 @@ pub async fn select_pane(pane_id: &PaneId) -> Result<()> {
 mod tests {
     use super::Pane;
     use super::PaneId;
+    use super::parse;
+    use super::{FIELD_SEPARATOR, RECORD_SEPARATOR};
     use crate::Result;
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -365,5 +418,106 @@ mod tests {
         let result = Pane::from_str(line);
 
         assert!(result.is_err());
+    }
+
+    fn framed_pane_record(
+        id: &[u8],
+        index: &[u8],
+        active: &[u8],
+        title: &[u8],
+        command: &[u8],
+        path: &[u8],
+    ) -> Vec<u8> {
+        let mut record = Vec::new();
+        for token in [id, index, active] {
+            record.extend_from_slice(token);
+            record.push(FIELD_SEPARATOR);
+        }
+        append_field(&mut record, title, FIELD_SEPARATOR);
+        append_field(&mut record, command, FIELD_SEPARATOR);
+        append_field(&mut record, path, RECORD_SEPARATOR);
+        record
+    }
+
+    fn append_field(record: &mut Vec<u8>, data: &[u8], terminator: u8) {
+        record.extend_from_slice(data.len().to_string().as_bytes());
+        record.push(FIELD_SEPARATOR);
+        record.extend_from_slice(data);
+        record.push(terminator);
+    }
+
+    #[test]
+    fn parse_legacy_pane_with_unit_separator() {
+        let pane = Pane::from_str("%1:0:false:'title\x1f':'cmd':/tmp").unwrap();
+
+        assert_eq!(pane.title, "title\x1f");
+    }
+
+    #[test]
+    fn parse_framed_pane_preserves_arbitrary_utf8_data() {
+        let title = "π - Chef d'orchestre: \\\x1f# $;\n";
+        let command = "python -c 'print(\"$x\");'\\\x1f\n";
+        let path = "/tmp/a:b\\c#d$e;\nnext";
+        let record = framed_pane_record(
+            b"%274",
+            b"1",
+            b"true",
+            title.as_bytes(),
+            command.as_bytes(),
+            path.as_bytes(),
+        );
+
+        let pane = parse::framed_panes(&record).unwrap().remove(0);
+
+        assert_eq!(pane.id.as_str(), "%274");
+        assert_eq!(pane.index, 1);
+        assert!(pane.is_active);
+        assert_eq!(pane.title, title);
+        assert_eq!(pane.command, command);
+        assert_eq!(pane.dirpath, PathBuf::from(path));
+    }
+
+    #[test]
+    fn parse_framed_pane_from_str_accepts_record_terminator() {
+        let record = framed_pane_record(b"%1", b"0", b"false", b"title", b"zsh", b"/tmp");
+        let input = String::from_utf8(record).unwrap();
+
+        let pane = Pane::from_str(&input).unwrap();
+
+        assert_eq!(pane.title, "title");
+        assert_eq!(pane.command, "zsh");
+    }
+
+    #[test]
+    fn parse_framed_panes_rejects_malformed_records() {
+        let valid = framed_pane_record(b"%1", b"0", b"false", b"title", b"zsh", b"/tmp");
+        let mut missing_terminator = valid.clone();
+        missing_terminator.pop();
+        let mut trailing_bytes = valid.clone();
+        trailing_bytes.extend_from_slice(b"trailing");
+
+        let malformed = [
+            framed_pane_record(b"bad", b"0", b"false", b"title", b"zsh", b"/tmp"),
+            framed_pane_record(b"%1", b"no", b"false", b"title", b"zsh", b"/tmp"),
+            framed_pane_record(b"%1", b"0", b"maybe", b"title", b"zsh", b"/tmp"),
+            missing_terminator,
+            trailing_bytes,
+        ];
+
+        for record in malformed {
+            assert!(parse::framed_panes(&record).is_err());
+        }
+
+        let invalid_utf8 = framed_pane_record(b"%1", b"0", b"false", &[0xff], b"zsh", b"/tmp");
+        assert!(parse::framed_panes(&invalid_utf8).is_err());
+
+        let undersized = b"%1\x1f0\x1ffalse\x1f4\x1ftitle\x1f3\x1fzsh\x1f4\x1f/tmp\n";
+        assert!(parse::framed_panes(undersized).is_err());
+
+        let oversized = b"%1\x1f0\x1ffalse\x1f999\x1ftitle\x1f3\x1fzsh\x1f4\x1f/tmp\n";
+        assert!(parse::framed_panes(oversized).is_err());
+
+        let overflowing = b"%1\x1f0\x1ffalse\x1f184467440737095516160\x1ftitle\n";
+        assert!(parse::framed_panes(overflowing).is_err());
     }
 }

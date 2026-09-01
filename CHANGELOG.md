@@ -16,6 +16,11 @@ and this project adheres to
 - `AGENTS.md` documents the project architecture, verification, and release
   conventions for coding agents
 
+### Fixed
+
+- Use byte-length-prefixed tmux records when reading panes, sessions, windows,
+  and client session names, preserving arbitrary UTF-8 values and newlines
+
 ### Changed
 
 - Make `README.md` the canonical crate overview and remove its

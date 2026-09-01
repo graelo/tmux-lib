@@ -15,14 +15,22 @@ use smol::process::Command;
 
 use crate::{
     Result,
-    error::{Error, check_process_success, map_add_intent},
+    error::{Error, check_process_success, map_add_intent, map_byte_parse_error},
     pane::Pane,
     pane_id::{PaneId, parse::pane_id},
-    parse::quoted_nonempty_string,
+    parse::{
+        ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, looks_like_framed,
+        quoted_nonempty_string,
+    },
     session_id::{SessionId, parse::session_id},
     window::Window,
     window_id::{WindowId, parse::window_id},
 };
+
+/// Format used by [`available_sessions`] for one session per newline-terminated record.
+const SESSION_LIST_FORMAT: &str =
+    "#{session_id}\x1f#{n:session_name}\x1f#{session_name}\x1f#{n:session_path}\x1f#{session_path}";
+const SESSION_LIST_INTENT: &str = "#{session_id}\\x1f#{n:session_name}\\x1f#{session_name}\\x1f#{n:session_path}\\x1f#{session_path}\\n";
 
 /// A Tmux session.
 ///
@@ -63,22 +71,41 @@ impl FromStr for Session {
     /// $4:'tmux-hacking':/Users/graelo/tmux
     /// ```
     ///
-    /// This status line is obtained with
+    /// The preferred status format is a byte-framed, newline-terminated
+    /// record:
     ///
     /// ```text
-    /// tmux list-sessions -F "#{session_id}:'#{session_name}':#{session_path}"
+    /// #{session_id}\x1f#{n:session_name}\x1f#{session_name}\x1f#{n:session_path}\x1f#{session_path}\n
+    /// ```
+    ///
+    /// The legacy quote-delimited format is also accepted for compatibility:
+    ///
+    /// ```text
+    /// $1:'pytorch':/Users/graelo/ml/pytorch
+    /// $2:'rust':/Users/graelo/rust
+    /// $3:'server: $~':/Users/graelo/swift
+    /// $4:'tmux-hacking':/Users/graelo/tmux
+    /// ```
+    ///
+    /// The framed status is obtained with
+    ///
+    /// ```text
+    /// tmux list-sessions -F "#{session_id}\x1f#{n:session_name}\x1f#{session_name}\x1f#{n:session_path}\x1f#{session_path}"
     /// ```
     ///
     /// For definitions, look at `Session` type and the tmux man page for
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
         let desc = "Session";
-        let intent = "##{session_id}:'##{session_name}':##{session_path}";
+        if looks_like_framed(input.as_bytes()) {
+            return parse::framed_session(input.as_bytes())
+                .map_err(|e| map_byte_parse_error(desc, SESSION_LIST_INTENT, e));
+        }
 
-        let (_, sess) = all_consuming(parse::session)
+        let intent = "##{session_id}:'##{session_name}':##{session_path}";
+        let (_, sess) = all_consuming(parse::legacy_session)
             .parse(input)
             .map_err(|e| map_add_intent(desc, intent, e))?;
-
         Ok(sess)
     }
 }
@@ -86,7 +113,7 @@ impl FromStr for Session {
 pub(crate) mod parse {
     use super::*;
 
-    pub(crate) fn session(input: &str) -> IResult<&str, Session> {
+    pub(super) fn legacy_session(input: &str) -> IResult<&str, Session> {
         let (input, (id, _, name, _, dirpath)) = (
             session_id,
             char(':'),
@@ -105,6 +132,49 @@ pub(crate) mod parse {
             },
         ))
     }
+
+    pub(super) fn framed_session(input: &[u8]) -> std::result::Result<Session, ByteParseError> {
+        let mut cursor = ByteCursor::new(input);
+        let session = framed_session_record(&mut cursor)?;
+        if !cursor.is_at_end() {
+            return Err(ByteParseError::new(
+                "unexpected trailing bytes after session record",
+            ));
+        }
+        Ok(session)
+    }
+
+    pub(super) fn framed_sessions(input: &[u8]) -> Result<Vec<Session>> {
+        let mut cursor = ByteCursor::new(input);
+        let mut sessions = Vec::new();
+        while !cursor.is_at_end() {
+            sessions.push(
+                framed_session_record(&mut cursor)
+                    .map_err(|e| map_byte_parse_error("Session", SESSION_LIST_INTENT, e))?,
+            );
+        }
+        Ok(sessions)
+    }
+
+    fn framed_session_record(
+        cursor: &mut ByteCursor<'_>,
+    ) -> std::result::Result<Session, ByteParseError> {
+        let id = cursor
+            .take_token_str("session ID")?
+            .parse()
+            .map_err(|_| ByteParseError::new("invalid session ID"))?;
+        let name = cursor.take_length_prefixed_string(FIELD_SEPARATOR, "session name")?;
+        if name.is_empty() {
+            return Err(ByteParseError::new("session name is empty"));
+        }
+        let dirpath = cursor.take_length_prefixed_string(RECORD_SEPARATOR, "session path")?;
+
+        Ok(Session {
+            id,
+            name,
+            dirpath: dirpath.into(),
+        })
+    }
 }
 
 // ------------------------------
@@ -113,24 +183,11 @@ pub(crate) mod parse {
 
 /// Return a list of all `Session` from the current tmux session.
 pub async fn available_sessions() -> Result<Vec<Session>> {
-    let args = vec![
-        "list-sessions",
-        "-F",
-        "#{session_id}:'#{session_name}':#{session_path}",
-    ];
+    let args = vec!["list-sessions", "-F", SESSION_LIST_FORMAT];
 
     let output = Command::new("tmux").args(&args).output().await?;
-    let buffer = String::from_utf8(output.stdout)?;
-
-    // Each call to `Session::parse` returns a `Result<Session, _>`. All results
-    // are collected into a Result<Vec<Session>, _>, thanks to `collect()`.
-    let result: Result<Vec<Session>> = buffer
-        .trim_end() // trim last '\n' as it would create an empty line
-        .split('\n')
-        .map(Session::from_str)
-        .collect();
-
-    result
+    check_process_success(&output, "list-sessions")?;
+    parse::framed_sessions(&output.stdout)
 }
 
 /// Create a Tmux session (and thus a window & pane).
@@ -186,6 +243,8 @@ pub async fn new_session(
 mod tests {
     use super::Session;
     use super::SessionId;
+    use super::parse;
+    use super::{FIELD_SEPARATOR, RECORD_SEPARATOR};
     use crate::Result;
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -297,5 +356,56 @@ mod tests {
         let session = Session::from_str(input).expect("Should parse session with colon in path");
 
         assert_eq!(session.dirpath, PathBuf::from("/path/with:colon/here"));
+    }
+
+    fn framed_session_record(name: &[u8], path: &[u8]) -> Vec<u8> {
+        let mut record = b"$7\x1f".to_vec();
+        append_field(&mut record, name, FIELD_SEPARATOR);
+        append_field(&mut record, path, RECORD_SEPARATOR);
+        record
+    }
+
+    fn append_field(record: &mut Vec<u8>, data: &[u8], terminator: u8) {
+        record.extend_from_slice(data.len().to_string().as_bytes());
+        record.push(FIELD_SEPARATOR);
+        record.extend_from_slice(data);
+        record.push(terminator);
+    }
+
+    #[test]
+    fn parse_legacy_session_with_unit_separator() {
+        let session = Session::from_str("$7:'name\x1f':/tmp").unwrap();
+
+        assert_eq!(session.name, "name\x1f");
+    }
+
+    #[test]
+    fn parse_framed_session_preserves_arbitrary_utf8_data() {
+        let name = "π's: \\\x1f# $;";
+        let path = "/tmp/a:b\\c\nnext";
+        let session = Session::from_str(
+            std::str::from_utf8(&framed_session_record(name.as_bytes(), path.as_bytes())).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(session.name, name);
+        assert_eq!(session.dirpath, PathBuf::from(path));
+    }
+
+    #[test]
+    fn parse_framed_sessions_rejects_malformed_records() {
+        let valid = framed_session_record(b"name", b"/tmp");
+        let mut missing_terminator = valid.clone();
+        missing_terminator.pop();
+        let mut trailing_bytes = valid.clone();
+        trailing_bytes.extend_from_slice(b"trailing");
+        let invalid_utf8 = framed_session_record(&[0xff], b"/tmp");
+
+        for record in [missing_terminator, trailing_bytes, invalid_utf8] {
+            assert!(parse::framed_sessions(&record).is_err());
+        }
+
+        let invalid_length = b"$7\x1fnot-a-number\x1fname\x1f4\x1f/tmp\n";
+        assert!(parse::framed_sessions(invalid_length).is_err());
     }
 }

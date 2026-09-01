@@ -61,6 +61,22 @@ pub fn map_add_intent(
     }
 }
 
+/// Convert a byte-protocol parsing error into the public parse error type.
+pub(crate) fn map_byte_parse_error(
+    desc: &'static str,
+    intent: &'static str,
+    message: impl std::fmt::Display,
+) -> Error {
+    Error::ParseError {
+        desc,
+        intent,
+        err: nom::Err::Failure(nom::error::Error::new(
+            message.to_string(),
+            nom::error::ErrorKind::Verify,
+        )),
+    }
+}
+
 /// Ensure that the output's stdout and stderr are empty, indicating
 /// the command had succeeded.
 ///
