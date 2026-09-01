@@ -5,11 +5,7 @@
 
 use std::{path::PathBuf, str::FromStr};
 
-use nom::{
-    IResult, Parser,
-    character::complete::{char, not_line_ending},
-    combinator::all_consuming,
-};
+use nom::{Parser, character::complete::char, combinator::all_consuming};
 use serde::{Deserialize, Serialize};
 use smol::process::Command;
 
@@ -18,10 +14,7 @@ use crate::{
     error::{Error, check_process_success, map_add_intent, map_byte_parse_error},
     pane::Pane,
     pane_id::{PaneId, parse::pane_id},
-    parse::{
-        ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, looks_like_framed,
-        quoted_nonempty_string,
-    },
+    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR},
     session_id::{SessionId, parse::session_id},
     window::Window,
     window_id::{WindowId, parse::window_id},
@@ -38,7 +31,7 @@ const SESSION_LIST_INTENT: &str = "#{session_id}\\x1f#{n:session_name}\\x1f#{ses
 /// use std::str::FromStr;
 /// use tmux_lib::session::Session;
 ///
-/// let line = "$1:'pytorch':/Users/graelo/ml/pytorch";
+/// let line = "$1\x1f7\x1fpytorch\x1f24\x1f/Users/graelo/ml/pytorch\n";
 /// let session = Session::from_str(line).unwrap();
 ///
 /// assert_eq!(session.id.as_str(), "$1");
@@ -62,29 +55,20 @@ impl FromStr for Session {
     /// This returns a `Result<Session, Error>` as this call can obviously
     /// fail if provided an invalid format.
     ///
-    /// The expected format of the tmux status is
-    ///
-    /// ```text
-    /// $1:'pytorch':/Users/graelo/dl/pytorch
-    /// $2:'rust':/Users/graelo/rust
-    /// $3:'server: $~':/Users/graelo/swift
-    /// $4:'tmux-hacking':/Users/graelo/tmux
-    /// ```
-    ///
-    /// The preferred status format is a byte-framed, newline-terminated
-    /// record:
+    /// The tmux status is a byte-framed, newline-terminated record:
     ///
     /// ```text
     /// #{session_id}\x1f#{n:session_name}\x1f#{session_name}\x1f#{n:session_path}\x1f#{session_path}\n
     /// ```
     ///
-    /// The legacy quote-delimited format is also accepted for compatibility:
+    /// `#{n:...}` is a byte length, and `\x1f` is Unit Separator. This parser
+    /// accepts only this framed format. For example, tmux may emit:
     ///
     /// ```text
-    /// $1:'pytorch':/Users/graelo/ml/pytorch
-    /// $2:'rust':/Users/graelo/rust
-    /// $3:'server: $~':/Users/graelo/swift
-    /// $4:'tmux-hacking':/Users/graelo/tmux
+    /// $1\x1f7\x1fpytorch\x1f24\x1f/Users/graelo/ml/pytorch\n
+    /// $2\x1f4\x1frust\x1f18\x1f/Users/graelo/rust\n
+    /// $3\x1f10\x1fserver: $~\x1f19\x1f/Users/graelo/swift\n
+    /// $4\x1f12\x1ftmux-hacking\x1f18\x1f/Users/graelo/tmux\n
     /// ```
     ///
     /// The framed status is obtained with
@@ -96,42 +80,13 @@ impl FromStr for Session {
     /// For definitions, look at `Session` type and the tmux man page for
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
-        let desc = "Session";
-        if looks_like_framed(input.as_bytes()) {
-            return parse::framed_session(input.as_bytes())
-                .map_err(|e| map_byte_parse_error(desc, SESSION_LIST_INTENT, e));
-        }
-
-        let intent = "##{session_id}:'##{session_name}':##{session_path}";
-        let (_, sess) = all_consuming(parse::legacy_session)
-            .parse(input)
-            .map_err(|e| map_add_intent(desc, intent, e))?;
-        Ok(sess)
+        parse::framed_session(input.as_bytes())
+            .map_err(|e| map_byte_parse_error("Session", SESSION_LIST_INTENT, e))
     }
 }
 
-pub(crate) mod parse {
+mod parse {
     use super::*;
-
-    pub(super) fn legacy_session(input: &str) -> IResult<&str, Session> {
-        let (input, (id, _, name, _, dirpath)) = (
-            session_id,
-            char(':'),
-            quoted_nonempty_string,
-            char(':'),
-            not_line_ending,
-        )
-            .parse(input)?;
-
-        Ok((
-            input,
-            Session {
-                id,
-                name: name.to_string(),
-                dirpath: dirpath.into(),
-            },
-        ))
-    }
 
     pub(super) fn framed_session(input: &[u8]) -> std::result::Result<Session, ByteParseError> {
         let mut cursor = ByteCursor::new(input);
@@ -252,13 +207,29 @@ mod tests {
     #[test]
     fn parse_list_sessions() {
         let output = [
-            "$1:'pytorch':/Users/graelo/ml/pytorch",
-            "$2:'rust':/Users/graelo/rust",
-            "$3:'server: $':/Users/graelo/swift",
-            "$4:'tmux-hacking':/Users/graelo/tmux",
+            String::from_utf8(framed_session_record(
+                b"$1",
+                b"pytorch",
+                b"/Users/graelo/ml/pytorch",
+            ))
+            .unwrap(),
+            String::from_utf8(framed_session_record(b"$2", b"rust", b"/Users/graelo/rust"))
+                .unwrap(),
+            String::from_utf8(framed_session_record(
+                b"$3",
+                b"server: $",
+                b"/Users/graelo/swift",
+            ))
+            .unwrap(),
+            String::from_utf8(framed_session_record(
+                b"$4",
+                b"tmux-hacking",
+                b"/Users/graelo/tmux",
+            ))
+            .unwrap(),
         ];
         let sessions: Result<Vec<Session>> =
-            output.iter().map(|&line| Session::from_str(line)).collect();
+            output.iter().map(|line| Session::from_str(line)).collect();
         let sessions = sessions.expect("Could not parse tmux sessions");
 
         let expected = vec![
@@ -289,8 +260,13 @@ mod tests {
 
     #[test]
     fn parse_session_with_large_id() {
-        let input = "$999:'large-id-session':/home/user/projects";
-        let session = Session::from_str(input).expect("Should parse session with large id");
+        let input = String::from_utf8(framed_session_record(
+            b"$999",
+            b"large-id-session",
+            b"/home/user/projects",
+        ))
+        .unwrap();
+        let session = Session::from_str(&input).expect("Should parse session with large id");
 
         assert_eq!(session.id, SessionId::from_str("$999").unwrap());
         assert_eq!(session.name, "large-id-session");
@@ -299,8 +275,13 @@ mod tests {
 
     #[test]
     fn parse_session_with_spaces_in_path() {
-        let input = "$5:'dev':/Users/user/My Projects/rust";
-        let session = Session::from_str(input).expect("Should parse session with spaces in path");
+        let input = String::from_utf8(framed_session_record(
+            b"$5",
+            b"dev",
+            b"/Users/user/My Projects/rust",
+        ))
+        .unwrap();
+        let session = Session::from_str(&input).expect("Should parse session with spaces in path");
 
         assert_eq!(session.name, "dev");
         assert_eq!(
@@ -311,55 +292,70 @@ mod tests {
 
     #[test]
     fn parse_session_with_unicode_in_name() {
-        let input = "$6:'项目-日本語':/home/user/code";
-        let session = Session::from_str(input).expect("Should parse session with unicode name");
+        let input = String::from_utf8(framed_session_record(
+            b"$6",
+            "项目-日本語".as_bytes(),
+            b"/home/user/code",
+        ))
+        .unwrap();
+        let session = Session::from_str(&input).expect("Should parse session with unicode name");
 
         assert_eq!(session.name, "项目-日本語");
     }
 
     #[test]
     fn parse_session_fails_on_missing_id() {
-        let input = "'session-name':/path/to/dir";
-        let result = Session::from_str(input);
+        let input = String::from_utf8(framed_session_record(
+            b"bad",
+            b"session-name",
+            b"/path/to/dir",
+        ))
+        .unwrap();
+        let result = Session::from_str(&input);
 
         assert!(result.is_err());
     }
 
     #[test]
-    fn parse_session_fails_on_missing_name_quotes() {
-        let input = "$1:session-name:/path/to/dir";
-        let result = Session::from_str(input);
+    fn parse_session_rejects_legacy_format() {
+        let result = Session::from_str("$1:'session-name':/path/to/dir");
 
         assert!(result.is_err());
     }
 
     #[test]
     fn parse_session_fails_on_empty_name() {
-        let input = "$1:'':/path/to/dir";
-        let result = Session::from_str(input);
+        let input = String::from_utf8(framed_session_record(b"$1", b"", b"/path/to/dir")).unwrap();
+        let result = Session::from_str(&input);
 
         assert!(result.is_err());
     }
 
     #[test]
     fn parse_session_fails_on_malformed_id() {
-        let input = "@1:'session':/path"; // @ is window prefix, not session
-        let result = Session::from_str(input);
+        let input = String::from_utf8(framed_session_record(b"@1", b"session", b"/path")).unwrap();
+        let result = Session::from_str(&input); // @ is window prefix, not session.
 
         assert!(result.is_err());
     }
 
     #[test]
     fn parse_session_with_colon_in_path() {
-        // Paths can contain colons (e.g., Windows-style paths or special paths)
-        let input = "$7:'test':/path/with:colon/here";
-        let session = Session::from_str(input).expect("Should parse session with colon in path");
+        // Paths can contain colons (e.g., Windows-style paths or special paths).
+        let input = String::from_utf8(framed_session_record(
+            b"$7",
+            b"test",
+            b"/path/with:colon/here",
+        ))
+        .unwrap();
+        let session = Session::from_str(&input).expect("Should parse session with colon in path");
 
         assert_eq!(session.dirpath, PathBuf::from("/path/with:colon/here"));
     }
 
-    fn framed_session_record(name: &[u8], path: &[u8]) -> Vec<u8> {
-        let mut record = b"$7\x1f".to_vec();
+    fn framed_session_record(id: &[u8], name: &[u8], path: &[u8]) -> Vec<u8> {
+        let mut record = id.to_vec();
+        record.push(FIELD_SEPARATOR);
         append_field(&mut record, name, FIELD_SEPARATOR);
         append_field(&mut record, path, RECORD_SEPARATOR);
         record
@@ -373,18 +369,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_legacy_session_with_unit_separator() {
-        let session = Session::from_str("$7:'name\x1f':/tmp").unwrap();
-
-        assert_eq!(session.name, "name\x1f");
-    }
-
-    #[test]
     fn parse_framed_session_preserves_arbitrary_utf8_data() {
         let name = "π's: \\\x1f# $;";
         let path = "/tmp/a:b\\c\nnext";
         let session = Session::from_str(
-            std::str::from_utf8(&framed_session_record(name.as_bytes(), path.as_bytes())).unwrap(),
+            std::str::from_utf8(&framed_session_record(
+                b"$7",
+                name.as_bytes(),
+                path.as_bytes(),
+            ))
+            .unwrap(),
         )
         .unwrap();
 
@@ -394,12 +388,12 @@ mod tests {
 
     #[test]
     fn parse_framed_sessions_rejects_malformed_records() {
-        let valid = framed_session_record(b"name", b"/tmp");
+        let valid = framed_session_record(b"$7", b"name", b"/tmp");
         let mut missing_terminator = valid.clone();
         missing_terminator.pop();
         let mut trailing_bytes = valid.clone();
         trailing_bytes.extend_from_slice(b"trailing");
-        let invalid_utf8 = framed_session_record(&[0xff], b"/tmp");
+        let invalid_utf8 = framed_session_record(b"$7", &[0xff], b"/tmp");
 
         for record in [missing_terminator, trailing_bytes, invalid_utf8] {
             assert!(parse::framed_sessions(&record).is_err());

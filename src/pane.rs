@@ -6,25 +6,14 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use nom::{
-    IResult, Parser,
-    character::complete::{char, digit1, not_line_ending},
-    combinator::{all_consuming, map_res},
-};
 use serde::{Deserialize, Serialize};
 use smol::process::Command;
 
 use crate::{
     Result,
-    error::{
-        Error, check_empty_process_output, check_process_success, map_add_intent,
-        map_byte_parse_error,
-    },
-    pane_id::{PaneId, parse::pane_id},
-    parse::{
-        ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, boolean, looks_like_framed,
-        quoted_nonempty_string, quoted_string,
-    },
+    error::{Error, check_empty_process_output, check_process_success, map_byte_parse_error},
+    pane_id::PaneId,
+    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR},
     window_id::WindowId,
 };
 
@@ -77,8 +66,8 @@ impl FromStr for Pane {
     /// ```
     ///
     /// `#{n:...}` is a byte length, and `\x1f` is Unit Separator. Data fields
-    /// are therefore allowed to contain either delimiter or newline. The
-    /// legacy quote-delimited format is also accepted for compatibility.
+    /// are therefore allowed to contain either delimiter or newline. This
+    /// parser accepts only this framed format.
     /// The framed status is obtained with
     ///
     /// ```text
@@ -88,17 +77,8 @@ impl FromStr for Pane {
     /// For definitions, look at `Pane` type and the tmux man page for
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
-        let desc = "Pane";
-        if looks_like_framed(input.as_bytes()) {
-            return parse::framed_pane(input.as_bytes())
-                .map_err(|e| map_byte_parse_error(desc, PANE_LIST_INTENT, e));
-        }
-
-        let intent = "##{pane_id}:##{pane_index}:##{?pane_active,true,false}:'##{pane_title}':'##{pane_current_command}':##{pane_current_path}";
-        let (_, pane) = all_consuming(parse::legacy_pane)
-            .parse(input)
-            .map_err(|e| map_add_intent(desc, intent, e))?;
-        Ok(pane)
+        parse::framed_pane(input.as_bytes())
+            .map_err(|e| map_byte_parse_error("Pane", PANE_LIST_INTENT, e))
     }
 }
 
@@ -130,37 +110,8 @@ impl Pane {
     }
 }
 
-pub(crate) mod parse {
+mod parse {
     use super::*;
-
-    pub(super) fn legacy_pane(input: &str) -> IResult<&str, Pane> {
-        let (input, (id, _, index, _, is_active, _, title, _, command, _, dirpath)) = (
-            pane_id,
-            char(':'),
-            map_res(digit1, str::parse),
-            char(':'),
-            boolean,
-            char(':'),
-            quoted_string,
-            char(':'),
-            quoted_nonempty_string,
-            char(':'),
-            not_line_ending,
-        )
-            .parse(input)?;
-
-        Ok((
-            input,
-            Pane {
-                id,
-                index,
-                is_active,
-                title: title.into(),
-                dirpath: dirpath.into(),
-                command: command.into(),
-            },
-        ))
-    }
 
     pub(super) fn framed_pane(input: &[u8]) -> std::result::Result<Pane, ByteParseError> {
         let mut cursor = ByteCursor::new(input);
@@ -287,11 +238,35 @@ mod tests {
     #[test]
     fn parse_list_panes() {
         let output = [
-            "%20:0:false:'rmbp':'nvim':/Users/graelo/code/rust/tmux-backup",
-            "%21:1:true:'graelo@server: ~':'tmux':/Users/graelo/code/rust/tmux-backup",
-            "%27:2:false:'rmbp':'man man':/Users/graelo/code/rust/tmux-backup",
+            String::from_utf8(framed_pane_record(
+                b"%20",
+                b"0",
+                b"false",
+                b"rmbp",
+                b"nvim",
+                b"/Users/graelo/code/rust/tmux-backup",
+            ))
+            .unwrap(),
+            String::from_utf8(framed_pane_record(
+                b"%21",
+                b"1",
+                b"true",
+                b"graelo@server: ~",
+                b"tmux",
+                b"/Users/graelo/code/rust/tmux-backup",
+            ))
+            .unwrap(),
+            String::from_utf8(framed_pane_record(
+                b"%27",
+                b"2",
+                b"false",
+                b"rmbp",
+                b"man man",
+                b"/Users/graelo/code/rust/tmux-backup",
+            ))
+            .unwrap(),
         ];
-        let panes: Result<Vec<Pane>> = output.iter().map(|&line| Pane::from_str(line)).collect();
+        let panes: Result<Vec<Pane>> = output.iter().map(|line| Pane::from_str(line)).collect();
         let panes = panes.expect("Could not parse tmux panes");
 
         let expected = vec![
@@ -326,8 +301,16 @@ mod tests {
 
     #[test]
     fn parse_pane_with_empty_title() {
-        let line = "%20:0:false:'':'nvim':/Users/graelo/code/rust/tmux-backup";
-        let pane = Pane::from_str(line).expect("Could not parse pane with empty title");
+        let line = String::from_utf8(framed_pane_record(
+            b"%20",
+            b"0",
+            b"false",
+            b"",
+            b"nvim",
+            b"/Users/graelo/code/rust/tmux-backup",
+        ))
+        .unwrap();
+        let pane = Pane::from_str(&line).expect("Could not parse pane with empty title");
 
         let expected = Pane {
             id: PaneId::from_str("%20").unwrap(),
@@ -343,8 +326,16 @@ mod tests {
 
     #[test]
     fn parse_pane_with_large_index() {
-        let line = "%999:99:true:'host':'zsh':/home/user";
-        let pane = Pane::from_str(line).expect("Should parse pane with large index");
+        let line = String::from_utf8(framed_pane_record(
+            b"%999",
+            b"99",
+            b"true",
+            b"host",
+            b"zsh",
+            b"/home/user",
+        ))
+        .unwrap();
+        let pane = Pane::from_str(&line).expect("Should parse pane with large index");
 
         assert_eq!(pane.id, PaneId::from_str("%999").unwrap());
         assert_eq!(pane.index, 99);
@@ -353,8 +344,16 @@ mod tests {
 
     #[test]
     fn parse_pane_with_spaces_in_path() {
-        let line = "%1:0:false:'title':'vim':/Users/user/My Documents/project";
-        let pane = Pane::from_str(line).expect("Should parse pane with spaces in path");
+        let line = String::from_utf8(framed_pane_record(
+            b"%1",
+            b"0",
+            b"false",
+            b"title",
+            b"vim",
+            b"/Users/user/My Documents/project",
+        ))
+        .unwrap();
+        let pane = Pane::from_str(&line).expect("Should parse pane with spaces in path");
 
         assert_eq!(
             pane.dirpath,
@@ -364,58 +363,87 @@ mod tests {
 
     #[test]
     fn parse_pane_with_unicode_title() {
-        let line = "%1:0:true:'日本語タイトル':'bash':/home/user";
-        let pane = Pane::from_str(line).expect("Should parse pane with unicode title");
+        let line = String::from_utf8(framed_pane_record(
+            b"%1",
+            b"0",
+            b"true",
+            "日本語タイトル".as_bytes(),
+            b"bash",
+            b"/home/user",
+        ))
+        .unwrap();
+        let pane = Pane::from_str(&line).expect("Should parse pane with unicode title");
 
         assert_eq!(pane.title, "日本語タイトル");
     }
 
     #[test]
     fn parse_pane_with_complex_command() {
-        let line = "%1:0:false:'host':'python -m http.server 8080':/tmp";
-        let pane = Pane::from_str(line).expect("Should parse pane with complex command");
+        let line = String::from_utf8(framed_pane_record(
+            b"%1",
+            b"0",
+            b"false",
+            b"host",
+            b"python -m http.server 8080",
+            b"/tmp",
+        ))
+        .unwrap();
+        let pane = Pane::from_str(&line).expect("Should parse pane with complex command");
 
         assert_eq!(pane.command, "python -m http.server 8080");
     }
 
     #[test]
     fn parse_pane_fails_on_missing_id() {
-        let line = "0:false:'title':'cmd':/path";
-        let result = Pane::from_str(line);
+        let line = String::from_utf8(framed_pane_record(
+            b"bad", b"0", b"false", b"title", b"cmd", b"/path",
+        ))
+        .unwrap();
+        let result = Pane::from_str(&line);
 
         assert!(result.is_err());
     }
 
     #[test]
     fn parse_pane_fails_on_invalid_boolean() {
-        let line = "%1:0:yes:'title':'cmd':/path";
-        let result = Pane::from_str(line);
+        let line = String::from_utf8(framed_pane_record(
+            b"%1", b"0", b"yes", b"title", b"cmd", b"/path",
+        ))
+        .unwrap();
+        let result = Pane::from_str(&line);
 
         assert!(result.is_err());
     }
 
     #[test]
     fn parse_pane_fails_on_empty_command() {
-        // Command must be nonempty (uses quoted_nonempty_string)
-        let line = "%1:0:true:'title':'':/path";
-        let result = Pane::from_str(line);
+        let line = String::from_utf8(framed_pane_record(
+            b"%1", b"0", b"true", b"title", b"", b"/path",
+        ))
+        .unwrap();
+        let result = Pane::from_str(&line);
 
         assert!(result.is_err());
     }
 
     #[test]
     fn parse_pane_fails_on_missing_path() {
-        let line = "%1:0:true:'title':'cmd'";
-        let result = Pane::from_str(line);
+        let mut line = framed_pane_record(b"%1", b"0", b"true", b"title", b"cmd", b"/path");
+        line.pop();
+        let line = String::from_utf8(line).unwrap();
+        let result = Pane::from_str(&line);
 
         assert!(result.is_err());
     }
 
     #[test]
     fn parse_pane_fails_on_wrong_id_prefix() {
-        // % is for pane, @ is for window, $ is for session
-        let line = "@1:0:true:'title':'cmd':/path";
-        let result = Pane::from_str(line);
+        // % is for pane, @ is for window, $ is for session.
+        let line = String::from_utf8(framed_pane_record(
+            b"@1", b"0", b"true", b"title", b"cmd", b"/path",
+        ))
+        .unwrap();
+        let result = Pane::from_str(&line);
 
         assert!(result.is_err());
     }
@@ -447,10 +475,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_legacy_pane_with_unit_separator() {
-        let pane = Pane::from_str("%1:0:false:'title\x1f':'cmd':/tmp").unwrap();
-
-        assert_eq!(pane.title, "title\x1f");
+    fn parse_pane_rejects_legacy_format() {
+        assert!(Pane::from_str("%1:0:false:'title':'cmd':/tmp").is_err());
     }
 
     #[test]

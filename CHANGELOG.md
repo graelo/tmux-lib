@@ -23,6 +23,9 @@ and this project adheres to
 
 ### Changed
 
+- **Breaking:** remove legacy quote-delimited `FromStr` input for panes,
+  sessions, windows, and clients; these parsers now accept only byte-length-
+  prefixed framed tmux records
 - Make `README.md` the canonical crate overview and remove its
   `cargo-sync-readme` markers
 - Reduce crate-level Rust documentation to a link to the project README
