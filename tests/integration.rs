@@ -453,6 +453,51 @@ mod pane_tests {
     }
 
     #[test]
+    fn test_available_panes_preserves_unicode_apostrophe_title() {
+        if !tmux_available() {
+            eprintln!("Skipping test: tmux not available");
+            return;
+        }
+
+        let session_name = unique_session_name("pane-title");
+        let _guard = SessionGuard::new(&session_name);
+
+        block_on(async {
+            let result = server::start(&session_name).await;
+            assert!(result.is_ok(), "Failed to start session: {:?}", result);
+
+            let target = format!("={session_name}:0.0");
+            let result = Command::new("tmux")
+                .args(["set-option", "-p", "-t", &target, "automatic-rename", "off"])
+                .output();
+            assert!(result.is_ok(), "Failed to configure pane: {:?}", result);
+            assert!(result.unwrap().status.success());
+
+            let title = "π - Chef d'orchestre";
+            let result = Command::new("tmux")
+                .args(["select-pane", "-t", &target, "-T", title])
+                .output();
+            assert!(result.is_ok(), "Failed to set pane title: {:?}", result);
+            assert!(result.unwrap().status.success());
+
+            let pane_id = Command::new("tmux")
+                .args(["list-panes", "-t", &target, "-F", "#{pane_id}"])
+                .output()
+                .expect("Failed to list test pane")
+                .stdout;
+            let pane_id = String::from_utf8(pane_id).unwrap();
+            let pane_id = pane_id.trim_end();
+
+            let panes = pane::available_panes().await.unwrap();
+            let pane = panes
+                .iter()
+                .find(|pane| pane.id.as_str() == pane_id)
+                .expect("Test pane should be present");
+            assert_eq!(pane.title, title);
+        });
+    }
+
+    #[test]
     fn test_new_pane() {
         if !tmux_available() {
             eprintln!("Skipping test: tmux not available");

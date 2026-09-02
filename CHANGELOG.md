@@ -16,8 +16,19 @@ and this project adheres to
 - `AGENTS.md` documents the project architecture, verification, and release
   conventions for coding agents
 
+### Fixed
+
+- Use byte-length-prefixed tmux records when reading panes, sessions, windows,
+  and client session names, preserving arbitrary UTF-8 values and newlines
+- Normalize visually escaped tmux 3.2–3.5 command output before parsing framed
+  records, preserving arbitrary UTF-8 values and backslashes across tmux
+  versions
+
 ### Changed
 
+- **Breaking:** remove legacy quote-delimited `FromStr` input for panes,
+  sessions, windows, and clients; these parsers now accept only byte-length-
+  prefixed framed tmux records
 - Make `README.md` the canonical crate overview and remove its
   `cargo-sync-readme` markers
 - Reduce crate-level Rust documentation to a link to the project README
