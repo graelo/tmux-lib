@@ -7,7 +7,7 @@
 
 Read or manipulate tmux.
 
-Version requirement: _rustc 1.95.0+_
+Version requirements: _rustc 1.95.0+_ and _tmux 3.2+_
 
 ```toml
 [dependencies]

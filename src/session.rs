@@ -14,16 +14,15 @@ use crate::{
     error::{Error, check_process_success, map_add_intent, map_byte_parse_error},
     pane::Pane,
     pane_id::{PaneId, parse::pane_id},
-    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR},
+    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, normalize_tmux_output},
     session_id::{SessionId, parse::session_id},
     window::Window,
     window_id::{WindowId, parse::window_id},
 };
 
 /// Format used by [`available_sessions`] for one session per newline-terminated record.
-const SESSION_LIST_FORMAT: &str =
-    "#{session_id}\x1f#{n:session_name}\x1f#{session_name}\x1f#{n:session_path}\x1f#{session_path}";
-const SESSION_LIST_INTENT: &str = "#{session_id}\\x1f#{n:session_name}\\x1f#{session_name}\\x1f#{n:session_path}\\x1f#{session_path}\\n";
+const SESSION_LIST_FORMAT: &str = "#{session_id}\x1f#{n:session_name}\x1f#{s|\\\\|\\\\\\\\|:session_name}\x1f#{n:session_path}\x1f#{s|\\\\|\\\\\\\\|:session_path}";
+const SESSION_LIST_INTENT: &str = "#{session_id}\\x1f#{n:session_name}\\x1f#{s|\\\\|\\\\\\\\|:session_name}\\x1f#{n:session_path}\\x1f#{s|\\\\|\\\\\\\\|:session_path}\\n";
 
 /// A Tmux session.
 ///
@@ -71,10 +70,11 @@ impl FromStr for Session {
     /// $4\x1f12\x1ftmux-hacking\x1f18\x1f/Users/graelo/tmux\n
     /// ```
     ///
-    /// The framed status is obtained with
+    /// The CLI query doubles literal backslashes in data fields so tmux 3.2
+    /// through 3.5 can be normalized before parsing:
     ///
     /// ```text
-    /// tmux list-sessions -F "#{session_id}\x1f#{n:session_name}\x1f#{session_name}\x1f#{n:session_path}\x1f#{session_path}"
+    /// tmux list-sessions -F "#{session_id}\x1f#{n:session_name}\x1f#{s|\\|\\\\|:session_name}\x1f#{n:session_path}\x1f#{s|\\|\\\\|:session_path}"
     /// ```
     ///
     /// For definitions, look at `Session` type and the tmux man page for
@@ -142,7 +142,9 @@ pub async fn available_sessions() -> Result<Vec<Session>> {
 
     let output = Command::new("tmux").args(&args).output().await?;
     check_process_success(&output, "list-sessions")?;
-    parse::framed_sessions(&output.stdout)
+    let stdout = normalize_tmux_output(&output.stdout)
+        .map_err(|e| map_byte_parse_error("Session", SESSION_LIST_INTENT, e))?;
+    parse::framed_sessions(&stdout)
 }
 
 /// Create a Tmux session (and thus a window & pane).

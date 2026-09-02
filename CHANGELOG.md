@@ -20,6 +20,9 @@ and this project adheres to
 
 - Use byte-length-prefixed tmux records when reading panes, sessions, windows,
   and client session names, preserving arbitrary UTF-8 values and newlines
+- Normalize visually escaped tmux 3.2–3.5 command output before parsing framed
+  records, preserving arbitrary UTF-8 values and backslashes across tmux
+  versions
 
 ### Changed
 

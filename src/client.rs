@@ -8,12 +8,12 @@ use smol::process::Command;
 use crate::{
     Result,
     error::{Error, check_process_success, map_byte_parse_error},
-    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR},
+    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, normalize_tmux_output},
 };
 
 /// Format used by [`current`] for a newline-terminated client record.
-const CLIENT_FORMAT: &str = "#{n:client_session}\x1f#{client_session}\x1f#{n:client_last_session}\x1f#{client_last_session}";
-const CLIENT_INTENT: &str = "#{n:client_session}\\x1f#{client_session}\\x1f#{n:client_last_session}\\x1f#{client_last_session}\\n";
+const CLIENT_FORMAT: &str = "#{n:client_session}\x1f#{s|\\\\|\\\\\\\\|:client_session}\x1f#{n:client_last_session}\x1f#{s|\\\\|\\\\\\\\|:client_last_session}";
+const CLIENT_INTENT: &str = "#{n:client_session}\\x1f#{s|\\\\|\\\\\\\\|:client_session}\\x1f#{n:client_last_session}\\x1f#{s|\\\\|\\\\\\\\|:client_last_session}\\n";
 
 /// A Tmux client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,10 +45,11 @@ impl FromStr for Client {
     /// 15\x1fcurrent-session\x1f12\x1flast-session\n
     /// ```
     ///
-    /// The framed status is obtained with
+    /// The CLI query doubles literal backslashes in data fields so tmux 3.2
+    /// through 3.5 can be normalized before parsing:
     ///
     /// ```text
-    /// tmux display-message -p -F "#{n:client_session}\x1f#{client_session}\x1f#{n:client_last_session}\x1f#{client_last_session}"
+    /// tmux display-message -p -F "#{n:client_session}\x1f#{s|\\|\\\\|:client_session}\x1f#{n:client_last_session}\x1f#{s|\\|\\\\|:client_last_session}"
     /// ```
     ///
     /// For definitions, look at `Client` type and the tmux man page for
@@ -97,8 +98,9 @@ pub async fn current() -> Result<Client> {
 
     let output = Command::new("tmux").args(&args).output().await?;
     check_process_success(&output, "display-message")?;
-    parse::framed_client(&output.stdout)
-        .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT, e))
+    let stdout = normalize_tmux_output(&output.stdout)
+        .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT, e))?;
+    parse::framed_client(&stdout).map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT, e))
 }
 
 /// Return a list of all `Pane` from all sessions.

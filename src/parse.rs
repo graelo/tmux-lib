@@ -10,6 +10,92 @@ pub(crate) const FIELD_SEPARATOR: u8 = 0x1f;
 // splitting the output on newline.
 pub(crate) const RECORD_SEPARATOR: u8 = b'\n';
 
+/// Normalize tmux command output to raw framed-record bytes.
+///
+/// tmux 3.2 through 3.5 visually escapes command output with `vis(3)`, while
+/// newer versions preserve raw bytes. Command formats double every literal
+/// backslash in data fields before tmux emits them, making the legacy escapes
+/// unambiguous on every supported version.
+pub(crate) fn normalize_tmux_output(input: &[u8]) -> Result<Vec<u8>, ByteParseError> {
+    let mut output = Vec::with_capacity(input.len());
+    let mut position = 0;
+
+    while let Some(&byte) = input.get(position) {
+        if byte != b'\\' {
+            output.push(byte);
+            position += 1;
+            continue;
+        }
+
+        let escape_position = position;
+        let escaped = *input.get(position + 1).ok_or_else(|| {
+            ByteParseError::new(format!(
+                "incomplete tmux output escape at byte {escape_position}"
+            ))
+        })?;
+        let decoded = match escaped {
+            b'\\' => {
+                position += 2;
+                b'\\'
+            }
+            b'n' => {
+                position += 2;
+                b'\n'
+            }
+            b'r' => {
+                position += 2;
+                b'\r'
+            }
+            b'b' => {
+                position += 2;
+                0x08
+            }
+            b'a' => {
+                position += 2;
+                0x07
+            }
+            b'v' => {
+                position += 2;
+                0x0b
+            }
+            b't' => {
+                position += 2;
+                b'\t'
+            }
+            b'f' => {
+                position += 2;
+                0x0c
+            }
+            b's' => {
+                position += 2;
+                b' '
+            }
+            b'0'..=b'7' => {
+                let digits = input.get(position + 1..position + 4).ok_or_else(|| {
+                    ByteParseError::new(format!(
+                        "incomplete octal tmux output escape at byte {escape_position}"
+                    ))
+                })?;
+                if !digits.iter().all(|byte| matches!(byte, b'0'..=b'7')) || digits[0] > b'3' {
+                    return Err(ByteParseError::new(format!(
+                        "invalid octal tmux output escape at byte {escape_position}"
+                    )));
+                }
+                position += 4;
+                ((digits[0] - b'0') << 6) | ((digits[1] - b'0') << 3) | (digits[2] - b'0')
+            }
+            _ => {
+                return Err(ByteParseError::new(format!(
+                    "unknown tmux output escape at byte {escape_position}"
+                )));
+            }
+        };
+        output.push(decoded);
+    }
+
+    Ok(output)
+}
+
 #[derive(Debug)]
 pub(crate) struct ByteParseError {
     message: String,
@@ -118,5 +204,54 @@ impl<'a> ByteCursor<'a> {
 
     pub(crate) fn utf8(data: &'a [u8], field: &str) -> Result<&'a str, ByteParseError> {
         str::from_utf8(data).map_err(|_| ByteParseError::new(format!("{field} is not valid UTF-8")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_tmux_output;
+
+    #[test]
+    fn normalize_tmux_output_preserves_current_raw_output() {
+        let output = b"%1\x1f0\x1ftrue\x1f9\x1fline\\\\n\n";
+
+        let normalized = normalize_tmux_output(output).unwrap();
+
+        assert_eq!(normalized, b"%1\x1f0\x1ftrue\x1f9\x1fline\\n\n");
+    }
+
+    #[test]
+    fn normalize_tmux_output_decodes_legacy_vis_output() {
+        let output = b"%1\\0370\\037true\\0379\\037line\\n\\342\\230\\203\\\\\\037";
+
+        let normalized = normalize_tmux_output(output).unwrap();
+
+        assert_eq!(
+            normalized,
+            b"%1\x1f0\x1ftrue\x1f9\x1fline\n\xe2\x98\x83\\\x1f"
+        );
+    }
+
+    #[test]
+    fn normalize_tmux_output_decodes_all_c_style_escapes() {
+        let output = b"\\n\\r\\b\\a\\v\\t\\f\\s";
+
+        let normalized = normalize_tmux_output(output).unwrap();
+
+        assert_eq!(normalized, b"\n\r\x08\x07\x0b\t\x0c ");
+    }
+
+    #[test]
+    fn normalize_tmux_output_rejects_malformed_escapes() {
+        for output in [
+            b"\\".as_slice(),
+            b"\\12",
+            b"\\12x",
+            b"\\400",
+            b"\\777",
+            b"\\x",
+        ] {
+            assert!(normalize_tmux_output(output).is_err());
+        }
     }
 }

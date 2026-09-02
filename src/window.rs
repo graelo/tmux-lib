@@ -18,14 +18,14 @@ use crate::{
     layout::{self, window_layout},
     pane::Pane,
     pane_id::{PaneId, parse::pane_id},
-    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR},
+    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, normalize_tmux_output},
     session::Session,
     window_id::{WindowId, parse::window_id},
 };
 
 /// Format used by [`available_windows`] for one window per newline-terminated record.
-const WINDOW_LIST_FORMAT: &str = "#{window_id}\x1f#{window_index}\x1f#{?window_active,true,false}\x1f#{window_layout}\x1f#{n:window_name}\x1f#{window_name}\x1f#{n:window_linked_sessions_list}\x1f#{window_linked_sessions_list}";
-const WINDOW_LIST_INTENT: &str = "#{window_id}\\x1f#{window_index}\\x1f#{?window_active,true,false}\\x1f#{window_layout}\\x1f#{n:window_name}\\x1f#{window_name}\\x1f#{n:window_linked_sessions_list}\\x1f#{window_linked_sessions_list}\\n";
+const WINDOW_LIST_FORMAT: &str = "#{window_id}\x1f#{window_index}\x1f#{?window_active,true,false}\x1f#{window_layout}\x1f#{n:window_name}\x1f#{s|\\\\|\\\\\\\\|:window_name}\x1f#{n:window_linked_sessions_list}\x1f#{s|\\\\|\\\\\\\\|:window_linked_sessions_list}";
+const WINDOW_LIST_INTENT: &str = "#{window_id}\\x1f#{window_index}\\x1f#{?window_active,true,false}\\x1f#{window_layout}\\x1f#{n:window_name}\\x1f#{s|\\\\|\\\\\\\\|:window_name}\\x1f#{n:window_linked_sessions_list}\\x1f#{s|\\\\|\\\\\\\\|:window_linked_sessions_list}\\n";
 
 /// A Tmux window.
 ///
@@ -88,10 +88,11 @@ impl FromStr for Window {
     /// @10\x1f1\x1ffalse\x1fae3a,334x85,0,0[334x48,0,0,17,334x36,0,49{175x36,0,49,18,158x36,176,49,19}]\x1f9\x1fmytui-app\x1f12\x1ftmux-hacking\n
     /// @11\x1f2\x1ftrue\x1fe2e2,334x85,0,0{175x85,0,0,20,158x85,176,0[158x42,176,0,21,158x42,176,43,27]}\x1f11\x1ftmux-backup\x1f12\x1ftmux-hacking\n
     /// ```
-    /// The framed status is obtained with
+    /// The CLI query doubles literal backslashes in data fields so tmux 3.2
+    /// through 3.5 can be normalized before parsing:
     ///
     /// ```text
-    /// tmux list-windows -a -F "#{window_id}\x1f#{window_index}\x1f#{?window_active,true,false}\x1f#{window_layout}\x1f#{n:window_name}\x1f#{window_name}\x1f#{n:window_linked_sessions_list}\x1f#{window_linked_sessions_list}"
+    /// tmux list-windows -a -F "#{window_id}\x1f#{window_index}\x1f#{?window_active,true,false}\x1f#{window_layout}\x1f#{n:window_name}\x1f#{s|\\|\\\\|:window_name}\x1f#{n:window_linked_sessions_list}\x1f#{s|\\|\\\\|:window_linked_sessions_list}"
     /// ```
     ///
     /// For definitions, look at `Window` type and the tmux man page for
@@ -187,7 +188,9 @@ pub async fn available_windows() -> Result<Vec<Window>> {
 
     let output = Command::new("tmux").args(&args).output().await?;
     check_process_success(&output, "list-windows")?;
-    parse::framed_windows(&output.stdout)
+    let stdout = normalize_tmux_output(&output.stdout)
+        .map_err(|e| map_byte_parse_error("Window", WINDOW_LIST_INTENT, e))?;
+    parse::framed_windows(&stdout)
 }
 
 /// Create a Tmux window in a session exactly named as the passed `session`.

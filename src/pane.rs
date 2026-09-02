@@ -13,13 +13,13 @@ use crate::{
     Result,
     error::{Error, check_empty_process_output, check_process_success, map_byte_parse_error},
     pane_id::PaneId,
-    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR},
+    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, normalize_tmux_output},
     window_id::WindowId,
 };
 
 /// Format used by [`available_panes`] for one pane per newline-terminated record.
-const PANE_LIST_FORMAT: &str = "#{pane_id}\x1f#{pane_index}\x1f#{?pane_active,true,false}\x1f#{n:pane_title}\x1f#{pane_title}\x1f#{n:pane_current_command}\x1f#{pane_current_command}\x1f#{n:pane_current_path}\x1f#{pane_current_path}";
-const PANE_LIST_INTENT: &str = "#{pane_id}\\x1f#{pane_index}\\x1f#{?pane_active,true,false}\\x1f#{n:pane_title}\\x1f#{pane_title}\\x1f#{n:pane_current_command}\\x1f#{pane_current_command}\\x1f#{n:pane_current_path}\\x1f#{pane_current_path}\\n";
+const PANE_LIST_FORMAT: &str = "#{pane_id}\x1f#{pane_index}\x1f#{?pane_active,true,false}\x1f#{n:pane_title}\x1f#{s|\\\\|\\\\\\\\|:pane_title}\x1f#{n:pane_current_command}\x1f#{s|\\\\|\\\\\\\\|:pane_current_command}\x1f#{n:pane_current_path}\x1f#{s|\\\\|\\\\\\\\|:pane_current_path}";
+const PANE_LIST_INTENT: &str = "#{pane_id}\\x1f#{pane_index}\\x1f#{?pane_active,true,false}\\x1f#{n:pane_title}\\x1f#{s|\\\\|\\\\\\\\|:pane_title}\\x1f#{n:pane_current_command}\\x1f#{s|\\\\|\\\\\\\\|:pane_current_command}\\x1f#{n:pane_current_path}\\x1f#{s|\\\\|\\\\\\\\|:pane_current_path}\\n";
 
 /// A Tmux pane.
 ///
@@ -67,11 +67,13 @@ impl FromStr for Pane {
     ///
     /// `#{n:...}` is a byte length, and `\x1f` is Unit Separator. Data fields
     /// are therefore allowed to contain either delimiter or newline. This
-    /// parser accepts only this framed format.
-    /// The framed status is obtained with
+    /// parser accepts only this raw framed format.
+    ///
+    /// The CLI query doubles literal backslashes in data fields so tmux 3.2
+    /// through 3.5 can be normalized before parsing:
     ///
     /// ```text
-    /// tmux list-panes -a -F "#{pane_id}\x1f#{pane_index}\x1f#{?pane_active,true,false}\x1f#{n:pane_title}\x1f#{pane_title}\x1f#{n:pane_current_command}\x1f#{pane_current_command}\x1f#{n:pane_current_path}\x1f#{pane_current_path}"
+    /// tmux list-panes -a -F "#{pane_id}\x1f#{pane_index}\x1f#{?pane_active,true,false}\x1f#{n:pane_title}\x1f#{s|\\|\\\\|:pane_title}\x1f#{n:pane_current_command}\x1f#{s|\\|\\\\|:pane_current_command}\x1f#{n:pane_current_path}\x1f#{s|\\|\\\\|:pane_current_path}"
     /// ```
     ///
     /// For definitions, look at `Pane` type and the tmux man page for
@@ -180,7 +182,9 @@ pub async fn available_panes() -> Result<Vec<Pane>> {
 
     let output = Command::new("tmux").args(&args).output().await?;
     check_process_success(&output, "list-panes")?;
-    parse::framed_panes(&output.stdout)
+    let stdout = normalize_tmux_output(&output.stdout)
+        .map_err(|e| map_byte_parse_error("Pane", PANE_LIST_INTENT, e))?;
+    parse::framed_panes(&stdout)
 }
 
 /// Create a new pane (horizontal split) in the window with `window_id`, and return the new
