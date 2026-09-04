@@ -3,15 +3,12 @@
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 
 use crate::{
-    Result,
-    error::{Error, check_process_success, map_byte_parse_error},
+    error::{Error, map_byte_parse_error},
     wire::{
         ByteParseError, RecordReader, decode_one,
-        formats::{CLIENT_FIELDS, CLIENT_FORMAT, CLIENT_INTENT},
-        normalize_tmux_output,
+        formats::{CLIENT_FIELDS, CLIENT_INTENT},
     },
 };
 
@@ -63,63 +60,14 @@ impl FromStr for Client {
 impl Client {
     /// Build a `Client` from one framed record, reading the fields declared in
     /// [`CLIENT_FIELDS`].
-    fn decode(reader: &mut RecordReader<'_, '_>) -> std::result::Result<Client, ByteParseError> {
+    pub(crate) fn decode(
+        reader: &mut RecordReader<'_, '_>,
+    ) -> std::result::Result<Client, ByteParseError> {
         Ok(Client {
             session_name: reader.required_data("client session")?,
             last_session_name: reader.data("last client session")?,
         })
     }
-}
-
-// ------------------------------
-// Ops
-// ------------------------------
-
-/// Return the current client useful attributes.
-///
-/// # Errors
-///
-/// Returns an error if tmux fails or emits a malformed client record.
-pub fn current() -> Result<Client> {
-    let args = vec!["display-message", "-p", "-F", CLIENT_FORMAT.as_str()];
-
-    let output = Command::new("tmux").args(&args).output()?;
-    check_process_success(&output, "display-message")?;
-    let stdout = normalize_tmux_output(&output.stdout)
-        .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))?;
-    decode_one(&stdout, CLIENT_FIELDS, Client::decode)
-        .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))
-}
-
-/// Return a list of all `Pane` from all sessions.
-///
-/// # Panics
-///
-/// This function panics if it can't communicate with Tmux.
-pub fn display_message(message: &str) {
-    let args = vec!["display-message", message];
-
-    Command::new("tmux")
-        .args(&args)
-        .output()
-        .expect("Cannot communicate with Tmux for displaying message");
-}
-
-/// Switch to session exactly named `session_name`.
-///
-/// # Panics
-///
-/// This function panics if it can't communicate with Tmux.
-pub fn switch_client(session_name: &str) -> Result<()> {
-    let exact_session_name = format!("={session_name}");
-    let args = vec!["switch-client", "-t", &exact_session_name];
-
-    Command::new("tmux")
-        .args(&args)
-        .output()
-        .expect("Cannot communicate with Tmux for switching the client");
-
-    Ok(())
 }
 
 #[cfg(test)]

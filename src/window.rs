@@ -4,28 +4,17 @@
 
 use std::str::FromStr;
 
-use std::process::Command;
-
-use nom::{Parser, character::complete::char, combinator::all_consuming};
+use nom::{Parser, combinator::all_consuming};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Result,
-    error::{
-        Error, check_empty_process_output, check_process_success, map_add_intent,
-        map_byte_parse_error,
-    },
+    error::{Error, map_byte_parse_error},
     layout::{self, window_layout},
-    pane::Pane,
-    pane_id::{PaneId, parse::pane_id},
-    session::Session,
-    window_id::{WindowId, parse::window_id},
+    pane_id::PaneId,
+    window_id::WindowId,
     wire::{
-        ByteParseError, RecordReader, decode_all, decode_one,
-        formats::{
-            NEW_WINDOW_FORMAT, NEW_WINDOW_INTENT, WINDOW_FIELDS, WINDOW_FORMAT, WINDOW_INTENT,
-        },
-        normalize_tmux_output,
+        ByteParseError, RecordReader, decode_one,
+        formats::{WINDOW_FIELDS, WINDOW_INTENT},
     },
 };
 
@@ -116,7 +105,9 @@ impl Window {
 impl Window {
     /// Build a `Window` from one framed record, reading the fields declared in
     /// [`WINDOW_FIELDS`].
-    fn decode(reader: &mut RecordReader<'_, '_>) -> std::result::Result<Window, ByteParseError> {
+    pub(crate) fn decode(
+        reader: &mut RecordReader<'_, '_>,
+    ) -> std::result::Result<Window, ByteParseError> {
         let id = reader
             .token("window ID")?
             .parse()
@@ -142,93 +133,6 @@ impl Window {
             sessions: vec![session_names],
         })
     }
-}
-
-// ------------------------------
-// Ops
-// ------------------------------
-
-/// Return a list of all `Window` from all sessions.
-pub fn available_windows() -> Result<Vec<Window>> {
-    let args = vec!["list-windows", "-a", "-F", WINDOW_FORMAT.as_str()];
-
-    let output = Command::new("tmux").args(&args).output()?;
-    check_process_success(&output, "list-windows")?;
-    let stdout = normalize_tmux_output(&output.stdout)
-        .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))?;
-    decode_all(&stdout, WINDOW_FIELDS, Window::decode)
-        .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))
-}
-
-/// Create a Tmux window in a session exactly named as the passed `session`.
-///
-/// The new window attributes:
-///
-/// - created in the `session`
-/// - the window name is taken from the passed `window`
-/// - the working directory is the pane's working directory.
-///
-pub fn new_window(
-    session: &Session,
-    window: &Window,
-    pane: &Pane,
-    pane_command: Option<&str>,
-) -> Result<(WindowId, PaneId)> {
-    // Use session ID for targeting - it's unambiguous and immediately valid
-    // after session creation, unlike names which may have parsing issues
-    // (e.g., names containing colons) or brief lookup race conditions.
-    let target_session = session.id.as_str();
-
-    let mut args = vec![
-        "new-window",
-        "-d",
-        "-c",
-        pane.dirpath.to_str().unwrap(),
-        "-n",
-        &window.name,
-        "-t",
-        target_session,
-        "-P",
-        "-F",
-        NEW_WINDOW_FORMAT,
-    ];
-    if let Some(pane_command) = pane_command {
-        args.push(pane_command);
-    }
-
-    let output = Command::new("tmux").args(&args).output()?;
-
-    // Check exit status before parsing to avoid confusing parse errors
-    // when tmux fails and returns empty/garbage stdout.
-    check_process_success(&output, "new-window")?;
-
-    let buffer = String::from_utf8(output.stdout)?;
-    let buffer = buffer.trim_end();
-
-    let desc = "new-window";
-    let intent = NEW_WINDOW_INTENT;
-
-    let (_, (new_window_id, _, new_pane_id)) = all_consuming((window_id, char(':'), pane_id))
-        .parse(buffer)
-        .map_err(|e| map_add_intent(desc, intent, e))?;
-
-    Ok((new_window_id, new_pane_id))
-}
-
-/// Apply the provided `layout` to the window with `window_id`.
-pub fn set_layout(layout: &str, window_id: &WindowId) -> Result<()> {
-    let args = vec!["select-layout", "-t", window_id.as_str(), layout];
-
-    let output = Command::new("tmux").args(&args).output()?;
-    check_empty_process_output(&output, "select-layout")
-}
-
-/// Select (make active) the window with `window_id`.
-pub fn select_window(window_id: &WindowId) -> Result<()> {
-    let args = vec!["select-window", "-t", window_id.as_str()];
-
-    let output = Command::new("tmux").args(&args).output()?;
-    check_empty_process_output(&output, "select-window")
 }
 
 #[cfg(test)]

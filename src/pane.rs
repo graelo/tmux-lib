@@ -7,17 +7,13 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 
 use crate::{
-    Result,
-    error::{Error, check_empty_process_output, check_process_success, map_byte_parse_error},
+    error::{Error, map_byte_parse_error},
     pane_id::PaneId,
-    window_id::WindowId,
     wire::{
-        ByteParseError, RecordReader, decode_all, decode_one,
-        formats::{NEW_PANE_FORMAT, PANE_FIELDS, PANE_FORMAT, PANE_INTENT},
-        normalize_tmux_output,
+        ByteParseError, RecordReader, decode_one,
+        formats::{PANE_FIELDS, PANE_INTENT},
     },
 };
 
@@ -85,37 +81,11 @@ impl FromStr for Pane {
 }
 
 impl Pane {
-    /// Return the entire Pane content as a `Vec<u8>`.
-    ///
-    /// # Note
-    ///
-    /// The output contains the escape codes, joined lines with trailing spaces. This output is
-    /// processed by the function `tmux_lib::utils::cleanup_captured_buffer`.
-    ///
-    pub fn capture(&self) -> Result<Vec<u8>> {
-        let args = vec![
-            "capture-pane",
-            "-t",
-            self.id.as_str(),
-            "-J", // preserves trailing spaces & joins any wrapped lines
-            "-e", // include escape sequences for text & background
-            "-p", // output goes to stdout
-            "-S", // starting line number
-            "-",  // start of history
-            "-E", // ending line number
-            "-",  // end of history
-        ];
-
-        let output = Command::new("tmux").args(&args).output()?;
-
-        Ok(output.stdout)
-    }
-}
-
-impl Pane {
     /// Build a `Pane` from one framed record, reading the fields declared in
     /// [`PANE_FIELDS`].
-    fn decode(reader: &mut RecordReader<'_, '_>) -> std::result::Result<Pane, ByteParseError> {
+    pub(crate) fn decode(
+        reader: &mut RecordReader<'_, '_>,
+    ) -> std::result::Result<Pane, ByteParseError> {
         let id = reader
             .token("pane ID")?
             .parse()
@@ -138,64 +108,6 @@ impl Pane {
             command,
         })
     }
-}
-
-// ------------------------------
-// Ops
-// ------------------------------
-
-/// Return a list of all `Pane` from all sessions.
-pub fn available_panes() -> Result<Vec<Pane>> {
-    let args = vec!["list-panes", "-a", "-F", PANE_FORMAT.as_str()];
-
-    let output = Command::new("tmux").args(&args).output()?;
-    check_process_success(&output, "list-panes")?;
-    let stdout = normalize_tmux_output(&output.stdout)
-        .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))?;
-    decode_all(&stdout, PANE_FIELDS, Pane::decode)
-        .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))
-}
-
-/// Create a new pane (horizontal split) in the window with `window_id`, and return the new
-/// pane id.
-pub fn new_pane(
-    reference_pane: &Pane,
-    pane_command: Option<&str>,
-    window_id: &WindowId,
-) -> Result<PaneId> {
-    let mut args = vec![
-        "split-window",
-        "-h",
-        "-c",
-        reference_pane.dirpath.to_str().unwrap(),
-        "-t",
-        window_id.as_str(),
-        "-P",
-        "-F",
-        NEW_PANE_FORMAT,
-    ];
-    if let Some(pane_command) = pane_command {
-        args.push(pane_command);
-    }
-
-    let output = Command::new("tmux").args(&args).output()?;
-
-    // Check exit status before parsing to avoid confusing parse errors
-    // when tmux fails and returns empty/garbage stdout.
-    check_process_success(&output, "split-window")?;
-
-    let buffer = String::from_utf8(output.stdout)?;
-
-    let new_id = PaneId::from_str(buffer.trim_end())?;
-    Ok(new_id)
-}
-
-/// Select (make active) the pane with `pane_id`.
-pub fn select_pane(pane_id: &PaneId) -> Result<()> {
-    let args = vec!["select-pane", "-t", pane_id.as_str()];
-
-    let output = Command::new("tmux").args(&args).output()?;
-    check_empty_process_output(&output, "select-pane")
 }
 
 #[cfg(test)]

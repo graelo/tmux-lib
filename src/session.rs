@@ -5,24 +5,14 @@
 
 use std::{path::PathBuf, str::FromStr};
 
-use nom::{Parser, character::complete::char, combinator::all_consuming};
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 
 use crate::{
-    Result,
-    error::{Error, check_process_success, map_add_intent, map_byte_parse_error},
-    pane::Pane,
-    pane_id::{PaneId, parse::pane_id},
-    session_id::{SessionId, parse::session_id},
-    window::Window,
-    window_id::{WindowId, parse::window_id},
+    error::{Error, map_byte_parse_error},
+    session_id::SessionId,
     wire::{
-        ByteParseError, RecordReader, decode_all, decode_one,
-        formats::{
-            NEW_SESSION_FORMAT, NEW_SESSION_INTENT, SESSION_FIELDS, SESSION_FORMAT, SESSION_INTENT,
-        },
-        normalize_tmux_output,
+        ByteParseError, RecordReader, decode_one,
+        formats::{SESSION_FIELDS, SESSION_INTENT},
     },
 };
 
@@ -90,7 +80,9 @@ impl FromStr for Session {
 impl Session {
     /// Build a `Session` from one framed record, reading the fields declared
     /// in [`SESSION_FIELDS`].
-    fn decode(reader: &mut RecordReader<'_, '_>) -> std::result::Result<Session, ByteParseError> {
+    pub(crate) fn decode(
+        reader: &mut RecordReader<'_, '_>,
+    ) -> std::result::Result<Session, ByteParseError> {
         let id = reader
             .token("session ID")?
             .parse()
@@ -104,71 +96,6 @@ impl Session {
             dirpath: dirpath.into(),
         })
     }
-}
-
-// ------------------------------
-// Ops
-// ------------------------------
-
-/// Return a list of all `Session` from the current tmux session.
-pub fn available_sessions() -> Result<Vec<Session>> {
-    let args = vec!["list-sessions", "-F", SESSION_FORMAT.as_str()];
-
-    let output = Command::new("tmux").args(&args).output()?;
-    check_process_success(&output, "list-sessions")?;
-    let stdout = normalize_tmux_output(&output.stdout)
-        .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))?;
-    decode_all(&stdout, SESSION_FIELDS, Session::decode)
-        .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))
-}
-
-/// Create a Tmux session (and thus a window & pane).
-///
-/// The new session attributes:
-///
-/// - the session name is taken from the passed `session`
-/// - the working directory is taken from the pane's working directory.
-///
-pub fn new_session(
-    session: &Session,
-    window: &Window,
-    pane: &Pane,
-    pane_command: Option<&str>,
-) -> Result<(SessionId, WindowId, PaneId)> {
-    let mut args = vec![
-        "new-session",
-        "-d",
-        "-c",
-        pane.dirpath.to_str().unwrap(),
-        "-s",
-        &session.name,
-        "-n",
-        &window.name,
-        "-P",
-        "-F",
-        NEW_SESSION_FORMAT,
-    ];
-    if let Some(pane_command) = pane_command {
-        args.push(pane_command);
-    }
-
-    let output = Command::new("tmux").args(&args).output()?;
-
-    // Check exit status before parsing to avoid confusing parse errors
-    // when tmux fails and returns empty/garbage stdout.
-    check_process_success(&output, "new-session")?;
-
-    let buffer = String::from_utf8(output.stdout)?;
-    let buffer = buffer.trim_end();
-
-    let desc = "new-session";
-    let intent = NEW_SESSION_INTENT;
-    let (_, (new_session_id, _, new_window_id, _, new_pane_id)) =
-        all_consuming((session_id, char(':'), window_id, char(':'), pane_id))
-            .parse(buffer)
-            .map_err(|e| map_add_intent(desc, intent, e))?;
-
-    Ok((new_session_id, new_window_id, new_pane_id))
 }
 
 #[cfg(test)]

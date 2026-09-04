@@ -9,6 +9,7 @@
 pub(crate) mod field;
 pub(crate) mod formats;
 pub(crate) mod framing;
+pub(crate) mod options;
 pub(crate) mod record;
 
 pub(crate) use framing::{ByteParseError, normalize_tmux_output};

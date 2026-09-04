@@ -1,616 +1,482 @@
 //! Integration tests for tmux-lib.
 //!
-//! These tests require tmux to be installed and available in PATH.
-//! They create real tmux sessions/windows/panes and clean them up after each test.
+//! Each test runs against its own private tmux server, addressed by a unique
+//! socket name. Tests therefore neither observe each other nor touch the
+//! developer's own tmux server, which is what lets them assert exact counts
+//! and names rather than merely "not empty".
 
-use std::process::Command;
+use std::process::{Command, Output};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use tmux_lib::{
-    pane, server, session,
-    session::Session,
-    session_id::SessionId,
-    window::{self, Window},
-    window_id::WindowId,
+    Server, Tmux, session::Session, session_id::SessionId, window::Window, window_id::WindowId,
 };
 
-/// Counter for generating unique test session names.
+/// Counter for generating unique names.
 static TEST_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Generate a unique session name for testing.
-fn unique_session_name(prefix: &str) -> String {
+fn unique_name(prefix: &str) -> String {
     let count = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-    let pid = std::process::id();
-    format!("test-{}-{}-{}", prefix, pid, count)
+    format!("test-{prefix}-{}-{count}", std::process::id())
 }
 
-/// Kill a tmux session by name, ignoring errors.
-fn kill_session_sync(name: &str) {
-    let _ = Command::new("tmux")
-        .args(["kill-session", "-t", &format!("={}", name)])
-        .output();
-}
-
-/// A guard that ensures tmux sessions are cleaned up even if a test panics.
-/// The session is killed when this guard is dropped.
-struct SessionGuard {
-    names: Vec<String>,
-}
-
-impl SessionGuard {
-    fn new(name: impl Into<String>) -> Self {
-        Self {
-            names: vec![name.into()],
-        }
-    }
-
-    fn add(&mut self, name: impl Into<String>) {
-        self.names.push(name.into());
-    }
-}
-
-impl Drop for SessionGuard {
-    fn drop(&mut self) {
-        for name in &self.names {
-            kill_session_sync(name);
-        }
-    }
-}
-
-/// Check if tmux is available.
+/// Check whether tmux is installed at all.
 fn tmux_available() -> bool {
     Command::new("tmux").arg("-V").output().is_ok()
 }
 
+/// A private tmux server, killed when the test ends.
+struct TestServer {
+    socket: String,
+    socket_path: String,
+    tmux: Tmux,
+    session: String,
+}
+
+impl TestServer {
+    /// Start a private server holding one session, and return a handle to it.
+    fn start(prefix: &str) -> Self {
+        let socket = unique_name(&format!("sock-{prefix}"));
+        let tmux = Tmux::spawning_on(Server::socket_name(&socket));
+        let session = unique_name(prefix);
+
+        let mut server = Self {
+            socket,
+            socket_path: String::new(),
+            tmux,
+            session,
+        };
+        server
+            .tmux
+            .start_server(&server.session)
+            .expect("failed to start the private tmux server");
+
+        // Record the socket path while the server is alive: a test may kill it
+        // before the guard runs, and `kill-server` leaves the file behind.
+        let output = server.raw(&["display-message", "-p", "#{socket_path}"]);
+        server.socket_path = String::from_utf8(output.stdout)
+            .expect("socket path should be UTF-8")
+            .trim_end()
+            .to_owned();
+        server
+    }
+
+    fn tmux(&self) -> &Tmux {
+        &self.tmux
+    }
+
+    /// The name of the session created with the server.
+    fn session_name(&self) -> &str {
+        &self.session
+    }
+
+    /// Run a raw tmux command against this server, for fixture setup the
+    /// library deliberately does not model.
+    fn raw(&self, args: &[&str]) -> Output {
+        let mut argv = vec!["-L", self.socket.as_str()];
+        argv.extend_from_slice(args);
+        Command::new("tmux")
+            .args(argv)
+            .output()
+            .expect("failed to run tmux")
+    }
+
+    /// The only window of the initial session.
+    fn window(&self) -> Window {
+        let windows = self
+            .tmux
+            .available_windows()
+            .expect("failed to list windows");
+        windows
+            .into_iter()
+            .find(|w| w.sessions.iter().any(|s| s == &self.session))
+            .expect("the initial session should have a window")
+    }
+}
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        let _ = self.raw(&["kill-server"]);
+
+        if !self.socket_path.is_empty() {
+            let _ = std::fs::remove_file(&self.socket_path);
+        }
+    }
+}
+
+/// Skip the body when tmux is not installed.
+macro_rules! require_tmux {
+    () => {
+        if !tmux_available() {
+            eprintln!("Skipping test: tmux not available");
+            return;
+        }
+    };
+}
+
 // ============================================================================
-// Server Tests
+// Server
 // ============================================================================
 
 mod server_tests {
     use super::*;
 
     #[test]
-    fn test_start_and_kill_session() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn start_creates_a_session_and_kill_removes_it() {
+        require_tmux!();
+        let server = TestServer::start("server");
+        let tmux = server.tmux();
 
-        let session_name = unique_session_name("server");
-        let _guard = SessionGuard::new(&session_name);
+        let sessions = tmux.available_sessions().unwrap();
+        assert_eq!(sessions.len(), 1, "a private server holds only our session");
+        assert_eq!(sessions[0].name, server.session_name());
 
-        // Start a new session
-        let result = server::start(&session_name);
-        assert!(result.is_ok(), "Failed to start session: {:?}", result);
+        tmux.kill_session(server.session_name()).unwrap();
 
-        // Verify the session exists
-        let sessions = session::available_sessions().unwrap();
-        let found = sessions.iter().any(|s| s.name == session_name);
-        assert!(found, "Session '{}' should exist", session_name);
-
-        // Kill the session
-        let result = server::kill_session(&session_name);
-        assert!(result.is_ok(), "Failed to kill session: {:?}", result);
-
-        // Verify the session is gone
-        let sessions = session::available_sessions().unwrap_or_default();
-        let found = sessions.iter().any(|s| s.name == session_name);
-        assert!(!found, "Session '{}' should be gone", session_name);
+        // The last session going away takes the server with it, so listing
+        // sessions now fails rather than returning an empty list.
+        assert!(tmux.available_sessions().is_err());
     }
 
     #[test]
-    fn test_show_options_global() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn show_options_returns_the_global_options() {
+        require_tmux!();
+        let server = TestServer::start("opts");
 
-        let session_name = unique_session_name("opts");
-        let _guard = SessionGuard::new(&session_name);
+        let options = server.tmux().show_options(true).unwrap();
 
-        // Ensure server is running
-        let _ = server::start(&session_name);
-
-        // Get global options
-        let options = server::show_options(true);
-        assert!(options.is_ok(), "Failed to get options: {:?}", options);
-
-        let options = options.unwrap();
-        // Should have some common options
-        assert!(!options.is_empty(), "Options should not be empty");
+        assert!(!options.is_empty());
+        assert!(options.contains_key("status"));
     }
 
     #[test]
-    fn test_show_option() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn show_option_returns_one_named_option() {
+        require_tmux!();
+        let server = TestServer::start("opt");
+        let tmux = server.tmux();
 
-        let session_name = unique_session_name("opt");
-        let _guard = SessionGuard::new(&session_name);
+        server.raw(&["set-option", "-g", "status", "off"]);
 
-        // Ensure server is running
-        let _ = server::start(&session_name);
-
-        // Get a specific option that should exist
-        let result = server::show_option("status", true);
-        assert!(result.is_ok(), "Failed to get option: {:?}", result);
-    }
-
-    #[test]
-    fn test_default_command() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
-
-        let session_name = unique_session_name("defcmd");
-        let _guard = SessionGuard::new(&session_name);
-
-        // Ensure server is running
-        let _ = server::start(&session_name);
-
-        // Get default command
-        let result = server::default_command();
-        assert!(
-            result.is_ok(),
-            "Failed to get default command: {:?}",
-            result
+        // Pins current behaviour, which is wrong: `show_option` returns the
+        // whole `show-options` line rather than the value, because it passes
+        // `-q` (suppress errors) where it wants `-v` (value only). Fixed in a
+        // later commit; asserted here so the change is visible when it lands.
+        assert_eq!(
+            tmux.show_option("status", true).unwrap().as_deref(),
+            Some("status off")
         );
+    }
 
-        let cmd = result.unwrap();
-        // Should be a non-empty string (typically a shell path)
-        assert!(!cmd.is_empty(), "Default command should not be empty");
+    #[test]
+    fn show_option_returns_none_for_an_unset_option() {
+        require_tmux!();
+        let server = TestServer::start("optnone");
+
+        let value = server.tmux().show_option("@no-such-option", true).unwrap();
+
+        assert_eq!(value, None);
+    }
+
+    #[test]
+    fn default_command_falls_back_to_the_default_shell() {
+        require_tmux!();
+        let server = TestServer::start("defcmd");
+
+        let command = server.tmux().default_command().unwrap();
+
+        assert!(!command.is_empty());
     }
 }
 
 // ============================================================================
-// Session Tests
+// Sessions
 // ============================================================================
 
 mod session_tests {
     use super::*;
 
     #[test]
-    fn test_available_sessions() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn available_sessions_reports_name_and_id() {
+        require_tmux!();
+        let server = TestServer::start("avail");
 
-        let session_name = unique_session_name("avail");
-        let _guard = SessionGuard::new(&session_name);
+        let sessions = server.tmux().available_sessions().unwrap();
 
-        // Create a session
-        let _ = server::start(&session_name);
-
-        // Get available sessions
-        let sessions = session::available_sessions();
-        assert!(sessions.is_ok(), "Failed to get sessions: {:?}", sessions);
-
-        let sessions = sessions.unwrap();
-        let found = sessions.iter().find(|s| s.name == session_name);
-        assert!(found.is_some(), "Created session should be in list");
-
-        // Verify session has expected fields
-        let sess = found.unwrap();
-        assert_eq!(sess.name, session_name);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].name, server.session_name());
+        assert!(sessions[0].id.as_str().starts_with('$'));
     }
 
     #[test]
-    fn test_new_session() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn new_session_creates_a_second_session() {
+        require_tmux!();
+        let server = TestServer::start("new");
+        let tmux = server.tmux();
 
-        let session_name = unique_session_name("new");
-        let new_session_name = unique_session_name("created");
-        let mut guard = SessionGuard::new(&session_name);
-        guard.add(&new_session_name);
-
-        // Start initial session to ensure server is running
-        let _ = server::start(&session_name);
-
-        // Get windows/panes from our session to use as templates
-        let windows = window::available_windows().unwrap();
-        let our_window = windows
+        let window = server.window();
+        let panes = tmux.available_panes().unwrap();
+        let pane = panes
             .iter()
-            .find(|w| w.sessions.iter().any(|s| s == &session_name));
+            .find(|p| window.pane_ids().contains(&p.id))
+            .expect("the initial window should have a pane");
 
-        let panes = pane::available_panes().unwrap();
+        let created_name = unique_name("created");
+        let template = Session {
+            id: SessionId::from_str("$0").unwrap(),
+            name: created_name.clone(),
+            dirpath: pane.dirpath.clone(),
+        };
 
-        if let Some(window) = our_window
-            && let Some(pane) = panes.iter().find(|p| window.pane_ids().contains(&p.id))
-        {
-            // Create a template session
-            let template_session = Session {
-                id: SessionId::from_str("$0").unwrap(),
-                name: new_session_name.clone(),
-                dirpath: pane.dirpath.clone(),
-            };
+        let (_, window_id, pane_id) = tmux.new_session(&template, &window, pane, None).unwrap();
 
-            // Create the new session
-            let result = session::new_session(&template_session, window, pane, None);
-            assert!(result.is_ok(), "Failed to create session: {:?}", result);
+        assert!(window_id.as_str().starts_with('@'));
+        assert!(pane_id.as_str().starts_with('%'));
 
-            let (sess_id, win_id, pane_id) = result.unwrap();
-            // Just verify they were created (IDs are opaque types)
-            let _ = sess_id;
-            assert!(win_id.as_str().starts_with('@'));
-            assert!(pane_id.as_str().starts_with('%'));
-
-            // Verify the session exists
-            let sessions = session::available_sessions().unwrap();
-            let found = sessions.iter().any(|s| s.name == new_session_name);
-            assert!(found, "New session should exist");
-        }
+        let sessions = tmux.available_sessions().unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().any(|s| s.name == created_name));
     }
 }
 
 // ============================================================================
-// Window Tests
+// Windows
 // ============================================================================
 
 mod window_tests {
     use super::*;
 
     #[test]
-    fn test_available_windows() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn available_windows_reports_one_window_for_a_fresh_session() {
+        require_tmux!();
+        let server = TestServer::start("win");
 
-        let session_name = unique_session_name("win");
-        let _guard = SessionGuard::new(&session_name);
+        let windows = server.tmux().available_windows().unwrap();
 
-        // Create a session (which creates a window)
-        let _ = server::start(&session_name);
-
-        // Get available windows
-        let windows = window::available_windows();
-        assert!(windows.is_ok(), "Failed to get windows: {:?}", windows);
-
-        let windows = windows.unwrap();
-        assert!(!windows.is_empty(), "Should have at least one window");
-
-        // Check window has expected fields
-        let win = &windows[0];
-        assert!(win.id.as_str().starts_with('@'));
-        assert!(!win.name.is_empty());
-        assert!(!win.layout.is_empty());
+        assert_eq!(windows.len(), 1);
+        assert!(windows[0].id.as_str().starts_with('@'));
+        assert!(!windows[0].name.is_empty());
+        assert!(!windows[0].layout.is_empty());
+        assert_eq!(windows[0].sessions, vec![server.session_name().to_owned()]);
     }
 
     #[test]
-    fn test_new_window() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn new_window_adds_a_named_window_to_the_session() {
+        require_tmux!();
+        let server = TestServer::start("newwin");
+        let tmux = server.tmux();
 
-        let session_name = unique_session_name("newwin");
-        let _guard = SessionGuard::new(&session_name);
-        let window_name = "test-window";
-
-        // Create a session
-        let _ = server::start(&session_name);
-
-        // Get current session, window, and pane from our session
-        let sessions = session::available_sessions().unwrap();
-        let session = sessions.iter().find(|s| s.name == session_name).unwrap();
-
-        let windows = window::available_windows().unwrap();
-        let our_window = windows
+        let sessions = tmux.available_sessions().unwrap();
+        let session = sessions
             .iter()
-            .find(|w| w.sessions.iter().any(|s| s == &session_name));
+            .find(|s| s.name == server.session_name())
+            .expect("our session");
+        let window = server.window();
+        let panes = tmux.available_panes().unwrap();
+        let pane = panes
+            .iter()
+            .find(|p| window.pane_ids().contains(&p.id))
+            .expect("the initial window should have a pane");
 
-        let panes = pane::available_panes().unwrap();
+        let template = Window {
+            id: WindowId::from_str("@0").unwrap(),
+            index: 0,
+            is_active: false,
+            layout: String::new(),
+            name: "test-window".to_owned(),
+            sessions: vec![server.session_name().to_owned()],
+        };
 
-        if let Some(win) = our_window
-            && let Some(pane) = panes.iter().find(|p| win.pane_ids().contains(&p.id))
-        {
-            // Create a template window
-            let template_window = Window {
-                id: WindowId::from_str("@0").unwrap(),
-                index: 0,
-                is_active: false,
-                layout: String::new(),
-                name: window_name.to_string(),
-                sessions: vec![session_name.clone()],
-            };
+        let (window_id, pane_id) = tmux.new_window(session, &template, pane, None).unwrap();
 
-            // Create new window
-            let result = window::new_window(session, &template_window, pane, None);
-            assert!(result.is_ok(), "Failed to create window: {:?}", result);
+        assert!(window_id.as_str().starts_with('@'));
+        assert!(pane_id.as_str().starts_with('%'));
 
-            let (win_id, pane_id) = result.unwrap();
-            assert!(win_id.as_str().starts_with('@'));
-            assert!(pane_id.as_str().starts_with('%'));
-
-            // Verify window exists
-            let windows = window::available_windows().unwrap();
-            let found = windows.iter().any(|w| w.name == window_name);
-            assert!(found, "New window should exist");
-        }
+        let windows = tmux.available_windows().unwrap();
+        assert_eq!(windows.len(), 2);
+        assert!(windows.iter().any(|w| w.name == "test-window"));
     }
 
     #[test]
-    fn test_select_window() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn select_window_makes_it_active() {
+        require_tmux!();
+        let server = TestServer::start("selwin");
+        let tmux = server.tmux();
 
-        let session_name = unique_session_name("selwin");
-        let _guard = SessionGuard::new(&session_name);
-
-        // Create a session
-        let _ = server::start(&session_name);
-
-        // Get windows from our session specifically
-        let windows = window::available_windows().unwrap();
-        let our_window = windows
+        server.raw(&["new-window", "-d", "-t", server.session_name()]);
+        let windows = tmux.available_windows().unwrap();
+        let target = windows
             .iter()
-            .find(|w| w.sessions.iter().any(|s| s == &session_name));
+            .find(|w| !w.is_active)
+            .expect("the second window should be inactive");
 
-        if let Some(win) = our_window {
-            // Select the window
-            let result = window::select_window(&win.id);
-            assert!(result.is_ok(), "Failed to select window: {:?}", result);
-        }
+        tmux.select_window(&target.id).unwrap();
+
+        let windows = tmux.available_windows().unwrap();
+        let now_active = windows
+            .iter()
+            .find(|w| w.is_active)
+            .expect("an active window");
+        assert_eq!(now_active.id, target.id);
     }
 
     #[test]
-    fn test_set_layout() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn set_layout_changes_the_window_layout() {
+        require_tmux!();
+        let server = TestServer::start("layout");
+        let tmux = server.tmux();
 
-        let session_name = unique_session_name("layout");
-        let _guard = SessionGuard::new(&session_name);
+        // A layout is only meaningful with more than one pane.
+        server.raw(&["split-window", "-v", "-t", server.session_name()]);
+        let before = server.window().layout;
 
-        // Create a session
-        let _ = server::start(&session_name);
+        tmux.set_layout("even-horizontal", &server.window().id)
+            .unwrap();
 
-        // Get windows from our session specifically
-        let windows = window::available_windows().unwrap();
-        let our_window = windows
-            .iter()
-            .find(|w| w.sessions.iter().any(|s| s == &session_name));
-
-        if let Some(win) = our_window {
-            // Try setting a built-in layout
-            let result = window::set_layout("even-horizontal", &win.id);
-            // This may fail if there's only one pane, which is fine
-            // Just verify it doesn't panic
-            let _ = result;
-        }
+        let after = server.window().layout;
+        assert_ne!(before, after, "the layout should have been rewritten");
     }
 }
 
 // ============================================================================
-// Pane Tests
+// Panes
 // ============================================================================
 
 mod pane_tests {
     use super::*;
 
     #[test]
-    fn test_available_panes() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn available_panes_reports_id_and_command() {
+        require_tmux!();
+        let server = TestServer::start("pane");
 
-        let session_name = unique_session_name("pane");
-        let _guard = SessionGuard::new(&session_name);
+        let panes = server.tmux().available_panes().unwrap();
 
-        // Create a session (which creates a pane)
-        let _ = server::start(&session_name);
-
-        // Get available panes
-        let panes = pane::available_panes();
-        assert!(panes.is_ok(), "Failed to get panes: {:?}", panes);
-
-        let panes = panes.unwrap();
-        assert!(!panes.is_empty(), "Should have at least one pane");
-
-        // Check pane has expected fields
-        let p = &panes[0];
-        assert!(p.id.as_str().starts_with('%'));
-        assert!(!p.command.is_empty());
+        assert_eq!(panes.len(), 1);
+        assert!(panes[0].id.as_str().starts_with('%'));
+        assert!(!panes[0].command.is_empty());
     }
 
     #[test]
-    fn test_available_panes_preserves_unicode_apostrophe_title() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn available_panes_preserves_a_unicode_title() {
+        require_tmux!();
+        let server = TestServer::start("pane-title");
+        let target = format!("={}:0.0", server.session_name());
 
-        let session_name = unique_session_name("pane-title");
-        let _guard = SessionGuard::new(&session_name);
-
-        let result = server::start(&session_name);
-        assert!(result.is_ok(), "Failed to start session: {:?}", result);
-
-        let target = format!("={session_name}:0.0");
-        let result = Command::new("tmux")
-            .args(["set-option", "-p", "-t", &target, "automatic-rename", "off"])
-            .output();
-        assert!(result.is_ok(), "Failed to configure pane: {:?}", result);
-        assert!(result.unwrap().status.success());
+        assert!(
+            server
+                .raw(&["set-option", "-p", "-t", &target, "automatic-rename", "off"])
+                .status
+                .success()
+        );
 
         let title = "π - Chef d'orchestre";
-        let result = Command::new("tmux")
-            .args(["select-pane", "-t", &target, "-T", title])
-            .output();
-        assert!(result.is_ok(), "Failed to set pane title: {:?}", result);
-        assert!(result.unwrap().status.success());
+        assert!(
+            server
+                .raw(&["select-pane", "-t", &target, "-T", title])
+                .status
+                .success()
+        );
 
-        let pane_id = Command::new("tmux")
-            .args(["list-panes", "-t", &target, "-F", "#{pane_id}"])
-            .output()
-            .expect("Failed to list test pane")
-            .stdout;
-        let pane_id = String::from_utf8(pane_id).unwrap();
-        let pane_id = pane_id.trim_end();
+        let panes = server.tmux().available_panes().unwrap();
 
-        let panes = pane::available_panes().unwrap();
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].title, title);
+    }
+
+    #[test]
+    fn new_pane_splits_the_window() {
+        require_tmux!();
+        let server = TestServer::start("newpane");
+        let tmux = server.tmux();
+
+        let window = server.window();
+        let panes = tmux.available_panes().unwrap();
         let pane = panes
             .iter()
-            .find(|pane| pane.id.as_str() == pane_id)
-            .expect("Test pane should be present");
-        assert_eq!(pane.title, title);
+            .find(|p| window.pane_ids().contains(&p.id))
+            .expect("the initial window should have a pane");
+
+        let new_pane_id = tmux.new_pane(pane, None, &window.id).unwrap();
+
+        assert!(new_pane_id.as_str().starts_with('%'));
+
+        let panes = tmux.available_panes().unwrap();
+        assert_eq!(panes.len(), 2);
+        assert!(panes.iter().any(|p| p.id == new_pane_id));
     }
 
     #[test]
-    fn test_new_pane() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn select_pane_makes_it_active() {
+        require_tmux!();
+        let server = TestServer::start("selpane");
+        let tmux = server.tmux();
 
-        let session_name = unique_session_name("newpane");
-        let _guard = SessionGuard::new(&session_name);
-
-        // Create a session
-        let _ = server::start(&session_name);
-
-        // Get windows from our session specifically
-        let windows = window::available_windows().unwrap();
-        let our_window = windows
+        server.raw(&["split-window", "-v", "-t", server.session_name()]);
+        let panes = tmux.available_panes().unwrap();
+        let target = panes
             .iter()
-            .find(|w| w.sessions.iter().any(|s| s == &session_name));
+            .find(|p| !p.is_active)
+            .expect("the second pane should be inactive");
 
-        let panes = pane::available_panes().unwrap();
+        tmux.select_pane(&target.id).unwrap();
 
-        if let Some(win) = our_window
-            && let Some(p) = panes.iter().find(|p| win.pane_ids().contains(&p.id))
-        {
-            // Create new pane
-            let result = pane::new_pane(p, None, &win.id);
-            assert!(result.is_ok(), "Failed to create pane: {:?}", result);
-
-            let new_pane_id = result.unwrap();
-            assert!(new_pane_id.as_str().starts_with('%'));
-
-            // Verify the new pane exists in the pane list
-            let panes_after = pane::available_panes().unwrap();
-            let found = panes_after.iter().any(|p| p.id == new_pane_id);
-            assert!(found, "New pane {} should exist", new_pane_id);
-        }
+        let panes = tmux.available_panes().unwrap();
+        let now_active = panes.iter().find(|p| p.is_active).expect("an active pane");
+        assert_eq!(now_active.id, target.id);
     }
 
     #[test]
-    fn test_select_pane() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn capture_pane_returns_the_pane_contents() {
+        require_tmux!();
+        let server = TestServer::start("capture");
+        let tmux = server.tmux();
 
-        let session_name = unique_session_name("selpane");
-        let _guard = SessionGuard::new(&session_name);
+        let pane_id = tmux.available_panes().unwrap()[0].id.clone();
+        let marker = "tmux-lib-capture-marker";
+        server.raw(&["send-keys", "-t", pane_id.as_str(), marker]);
 
-        // Create a session
-        let _ = server::start(&session_name);
-
-        // Get windows from our session to find its pane IDs
-        let windows = window::available_windows().unwrap();
-        let our_window = windows
-            .iter()
-            .find(|w| w.sessions.iter().any(|s| s == &session_name));
-
-        if let Some(win) = our_window {
-            let our_pane_ids = win.pane_ids();
-            let panes = pane::available_panes().unwrap();
-
-            // Find a pane that belongs to our window
-            if let Some(p) = panes.iter().find(|p| our_pane_ids.contains(&p.id)) {
-                // Select the pane
-                let result = pane::select_pane(&p.id);
-                assert!(result.is_ok(), "Failed to select pane: {:?}", result);
+        // The pane redraws asynchronously, so poll rather than sleep once.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let captured = tmux.capture_pane(&pane_id).unwrap();
+            if String::from_utf8_lossy(&captured).contains(marker) {
+                break;
             }
-        }
-    }
-
-    #[test]
-    fn test_pane_capture() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
-
-        let session_name = unique_session_name("capture");
-        let _guard = SessionGuard::new(&session_name);
-
-        // Create a session
-        let _ = server::start(&session_name);
-
-        // Get windows from our session to find its pane IDs
-        let windows = window::available_windows().unwrap();
-        let our_window = windows
-            .iter()
-            .find(|w| w.sessions.iter().any(|s| s == &session_name));
-
-        if let Some(win) = our_window {
-            let our_pane_ids = win.pane_ids();
-            let panes = pane::available_panes().unwrap();
-
-            // Find a pane that belongs to our window
-            if let Some(p) = panes.iter().find(|p| our_pane_ids.contains(&p.id)) {
-                // Capture pane content
-                let result = p.capture();
-                assert!(result.is_ok(), "Failed to capture pane: {:?}", result);
-
-                // Result is raw bytes, just verify it doesn't error
-                let _content = result.unwrap();
-            }
+            assert!(
+                Instant::now() < deadline,
+                "marker never appeared in the capture"
+            );
+            std::thread::sleep(Duration::from_millis(25));
         }
     }
 }
 
 // ============================================================================
-// Window pane_ids Method Tests
+// Window::pane_ids against the live server
 // ============================================================================
 
 mod window_pane_ids_tests {
     use super::*;
 
     #[test]
-    fn test_window_pane_ids_integration() {
-        if !tmux_available() {
-            eprintln!("Skipping test: tmux not available");
-            return;
-        }
+    fn pane_ids_match_the_panes_tmux_reports() {
+        require_tmux!();
+        let server = TestServer::start("paneids");
+        let tmux = server.tmux();
 
-        let session_name = unique_session_name("paneids");
-        let _guard = SessionGuard::new(&session_name);
+        server.raw(&["split-window", "-v", "-t", server.session_name()]);
 
-        // Create a session
-        let _ = server::start(&session_name);
+        let pane_ids = server.window().pane_ids();
+        assert_eq!(pane_ids.len(), 2);
 
-        // Get windows from our session specifically
-        let windows = window::available_windows().unwrap();
-        let our_window = windows
-            .iter()
-            .find(|w| w.sessions.iter().any(|s| s == &session_name));
-
-        if let Some(win) = our_window {
-            // Get pane IDs from window layout
-            let pane_ids = win.pane_ids();
-            assert!(!pane_ids.is_empty(), "Window should have at least one pane");
-
-            // Verify pane IDs match actual panes
-            let panes = pane::available_panes().unwrap();
-            for pane_id in &pane_ids {
-                let found = panes.iter().any(|p| &p.id == pane_id);
-                assert!(found, "Pane ID {:?} should exist in panes list", pane_id);
-            }
+        let panes = tmux.available_panes().unwrap();
+        for pane_id in &pane_ids {
+            assert!(
+                panes.iter().any(|p| &p.id == pane_id),
+                "pane {pane_id:?} should be listed"
+            );
         }
     }
 }
