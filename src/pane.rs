@@ -4,33 +4,18 @@
 //! information.
 
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    error::{Error, map_byte_parse_error},
     pane_id::PaneId,
-    wire::{
-        ByteParseError, RecordReader, decode_one,
-        formats::{PANE_FIELDS, PANE_INTENT},
-    },
+    wire::{ByteParseError, RecordReader},
 };
 
 /// A Tmux pane.
 ///
-/// ```
-/// use std::str::FromStr;
-/// use tmux_lib::pane::Pane;
-///
-/// let line = "%20\x1f0\x1ffalse\x1f4\x1frmbp\x1f4\x1fnvim\x1f35\x1f/Users/graelo/code/rust/tmux-backup\n";
-/// let pane = Pane::from_str(line).unwrap();
-///
-/// assert_eq!(pane.id.as_str(), "%20");
-/// assert_eq!(pane.index, 0);
-/// assert!(!pane.is_active);
-/// assert_eq!(pane.command, "nvim");
-/// ```
+/// Values are decoded from a framed `list-panes` record; see
+/// [`crate::Tmux::available_panes`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pane {
     /// Pane identifier, e.g. `%37`.
@@ -45,39 +30,6 @@ pub struct Pane {
     pub dirpath: PathBuf,
     /// Current command executed in the Pane
     pub command: String,
-}
-
-impl FromStr for Pane {
-    type Err = Error;
-
-    /// Parse a string containing tmux panes status into a new `Pane`.
-    ///
-    /// This returns a `Result<Pane, Error>` as this call can obviously
-    /// fail if provided an invalid format.
-    ///
-    /// The preferred format is a byte-framed, newline-terminated record:
-    ///
-    /// ```text
-    /// #{pane_id}\x1f#{pane_index}\x1f#{?pane_active,true,false}\x1f#{n:pane_title}\x1f#{pane_title}\x1f#{n:pane_current_command}\x1f#{pane_current_command}\x1f#{n:pane_current_path}\x1f#{pane_current_path}\n
-    /// ```
-    ///
-    /// `#{n:...}` is a byte length, and `\x1f` is Unit Separator. Data fields
-    /// are therefore allowed to contain either delimiter or newline. This
-    /// parser accepts only this raw framed format.
-    ///
-    /// The CLI query doubles literal backslashes in data fields so tmux 3.4
-    /// through 3.5 can be normalized before parsing:
-    ///
-    /// ```text
-    /// tmux list-panes -a -F "#{pane_id}\x1f#{pane_index}\x1f#{?pane_active,true,false}\x1f#{n:pane_title}\x1f#{s|\\|\\\\|:pane_title}\x1f#{n:pane_current_command}\x1f#{s|\\|\\\\|:pane_current_command}\x1f#{n:pane_current_path}\x1f#{s|\\|\\\\|:pane_current_path}"
-    /// ```
-    ///
-    /// For definitions, look at `Pane` type and the tmux man page for
-    /// definitions.
-    fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
-        decode_one(input.as_bytes(), PANE_FIELDS, Pane::decode)
-            .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))
-    }
 }
 
 impl Pane {
@@ -114,12 +66,17 @@ impl Pane {
 mod tests {
     use super::Pane;
     use super::PaneId;
-    use crate::wire::decode_all;
     use crate::wire::formats::{PANE_FIELDS, PANE_INTENT};
     use crate::wire::framing::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+    use crate::wire::{decode_all, decode_one};
 
-    fn decode_all_test(input: &[u8]) -> crate::Result<Vec<Pane>> {
+    fn parse_all(input: &[u8]) -> crate::Result<Vec<Pane>> {
         decode_all(input, PANE_FIELDS, Pane::decode)
+            .map_err(|e| crate::error::map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))
+    }
+
+    fn parse_one(input: &str) -> crate::Result<Pane> {
+        decode_one(input.as_bytes(), PANE_FIELDS, Pane::decode)
             .map_err(|e| crate::error::map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))
     }
     use crate::Result;
@@ -157,7 +114,7 @@ mod tests {
             ))
             .unwrap(),
         ];
-        let panes: Result<Vec<Pane>> = output.iter().map(|line| Pane::from_str(line)).collect();
+        let panes: Result<Vec<Pane>> = output.iter().map(|line| parse_one(line)).collect();
         let panes = panes.expect("Could not parse tmux panes");
 
         let expected = vec![
@@ -201,7 +158,7 @@ mod tests {
             b"/Users/graelo/code/rust/tmux-backup",
         ))
         .unwrap();
-        let pane = Pane::from_str(&line).expect("Could not parse pane with empty title");
+        let pane = parse_one(&line).expect("Could not parse pane with empty title");
 
         let expected = Pane {
             id: PaneId::from_str("%20").unwrap(),
@@ -226,7 +183,7 @@ mod tests {
             b"/home/user",
         ))
         .unwrap();
-        let pane = Pane::from_str(&line).expect("Should parse pane with large index");
+        let pane = parse_one(&line).expect("Should parse pane with large index");
 
         assert_eq!(pane.id, PaneId::from_str("%999").unwrap());
         assert_eq!(pane.index, 99);
@@ -244,7 +201,7 @@ mod tests {
             b"/Users/user/My Documents/project",
         ))
         .unwrap();
-        let pane = Pane::from_str(&line).expect("Should parse pane with spaces in path");
+        let pane = parse_one(&line).expect("Should parse pane with spaces in path");
 
         assert_eq!(
             pane.dirpath,
@@ -263,7 +220,7 @@ mod tests {
             b"/home/user",
         ))
         .unwrap();
-        let pane = Pane::from_str(&line).expect("Should parse pane with unicode title");
+        let pane = parse_one(&line).expect("Should parse pane with unicode title");
 
         assert_eq!(pane.title, "日本語タイトル");
     }
@@ -279,7 +236,7 @@ mod tests {
             b"/tmp",
         ))
         .unwrap();
-        let pane = Pane::from_str(&line).expect("Should parse pane with complex command");
+        let pane = parse_one(&line).expect("Should parse pane with complex command");
 
         assert_eq!(pane.command, "python -m http.server 8080");
     }
@@ -290,7 +247,7 @@ mod tests {
             b"bad", b"0", b"false", b"title", b"cmd", b"/path",
         ))
         .unwrap();
-        let result = Pane::from_str(&line);
+        let result = parse_one(&line);
 
         assert!(result.is_err());
     }
@@ -301,7 +258,7 @@ mod tests {
             b"%1", b"0", b"yes", b"title", b"cmd", b"/path",
         ))
         .unwrap();
-        let result = Pane::from_str(&line);
+        let result = parse_one(&line);
 
         assert!(result.is_err());
     }
@@ -312,7 +269,7 @@ mod tests {
             b"%1", b"0", b"true", b"title", b"", b"/path",
         ))
         .unwrap();
-        let result = Pane::from_str(&line);
+        let result = parse_one(&line);
 
         assert!(result.is_err());
     }
@@ -322,7 +279,7 @@ mod tests {
         let mut line = framed_pane_record(b"%1", b"0", b"true", b"title", b"cmd", b"/path");
         line.pop();
         let line = String::from_utf8(line).unwrap();
-        let result = Pane::from_str(&line);
+        let result = parse_one(&line);
 
         assert!(result.is_err());
     }
@@ -334,7 +291,7 @@ mod tests {
             b"@1", b"0", b"true", b"title", b"cmd", b"/path",
         ))
         .unwrap();
-        let result = Pane::from_str(&line);
+        let result = parse_one(&line);
 
         assert!(result.is_err());
     }
@@ -367,7 +324,7 @@ mod tests {
 
     #[test]
     fn parse_pane_rejects_legacy_format() {
-        assert!(Pane::from_str("%1:0:false:'title':'cmd':/tmp").is_err());
+        assert!(parse_one("%1:0:false:'title':'cmd':/tmp").is_err());
     }
 
     #[test]
@@ -384,7 +341,7 @@ mod tests {
             path.as_bytes(),
         );
 
-        let pane = decode_all_test(&record).unwrap().remove(0);
+        let pane = parse_all(&record).unwrap().remove(0);
 
         assert_eq!(pane.id.as_str(), "%274");
         assert_eq!(pane.index, 1);
@@ -399,7 +356,7 @@ mod tests {
         let record = framed_pane_record(b"%1", b"0", b"false", b"title", b"zsh", b"/tmp");
         let input = String::from_utf8(record).unwrap();
 
-        let pane = Pane::from_str(&input).unwrap();
+        let pane = parse_one(&input).unwrap();
 
         assert_eq!(pane.title, "title");
         assert_eq!(pane.command, "zsh");
@@ -422,19 +379,19 @@ mod tests {
         ];
 
         for record in malformed {
-            assert!(decode_all_test(&record).is_err());
+            assert!(parse_all(&record).is_err());
         }
 
         let invalid_utf8 = framed_pane_record(b"%1", b"0", b"false", &[0xff], b"zsh", b"/tmp");
-        assert!(decode_all_test(&invalid_utf8).is_err());
+        assert!(parse_all(&invalid_utf8).is_err());
 
         let undersized = b"%1\x1f0\x1ffalse\x1f4\x1ftitle\x1f3\x1fzsh\x1f4\x1f/tmp\n";
-        assert!(decode_all_test(undersized).is_err());
+        assert!(parse_all(undersized).is_err());
 
         let oversized = b"%1\x1f0\x1ffalse\x1f999\x1ftitle\x1f3\x1fzsh\x1f4\x1f/tmp\n";
-        assert!(decode_all_test(oversized).is_err());
+        assert!(parse_all(oversized).is_err());
 
         let overflowing = b"%1\x1f0\x1ffalse\x1f184467440737095516160\x1ftitle\n";
-        assert!(decode_all_test(overflowing).is_err());
+        assert!(parse_all(overflowing).is_err());
     }
 }

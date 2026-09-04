@@ -159,13 +159,9 @@ mod server_tests {
 
         server.raw(&["set-option", "-g", "status", "off"]);
 
-        // Pins current behaviour, which is wrong: `show_option` returns the
-        // whole `show-options` line rather than the value, because it passes
-        // `-q` (suppress errors) where it wants `-v` (value only). Fixed in a
-        // later commit; asserted here so the change is visible when it lands.
         assert_eq!(
             tmux.show_option("status", true).unwrap().as_deref(),
-            Some("status off")
+            Some("off")
         );
     }
 

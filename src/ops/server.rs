@@ -61,9 +61,12 @@ impl Tmux {
         check_empty_process_output(&output, "kill-session")
     }
 
-    /// Return the value of one tmux option.
+    /// Return the value of one tmux option, or `None` when it is unset.
+    ///
+    /// `-v` asks for the value alone; without it tmux prints `name value`.
+    /// `-q` turns an unknown option into empty output rather than an error.
     pub fn show_option(&self, option_name: &str, global: bool) -> Result<Option<String>> {
-        let mut args = vec!["show-options", "-w", "-q"];
+        let mut args = vec!["show-options", "-w", "-q", "-v"];
         if global {
             args.push("-g");
         }
