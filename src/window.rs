@@ -88,7 +88,7 @@ impl FromStr for Window {
     /// @10\x1f1\x1ffalse\x1fae3a,334x85,0,0[334x48,0,0,17,334x36,0,49{175x36,0,49,18,158x36,176,49,19}]\x1f9\x1fmytui-app\x1f12\x1ftmux-hacking\n
     /// @11\x1f2\x1ftrue\x1fe2e2,334x85,0,0{175x85,0,0,20,158x85,176,0[158x42,176,0,21,158x42,176,43,27]}\x1f11\x1ftmux-backup\x1f12\x1ftmux-hacking\n
     /// ```
-    /// The CLI query doubles literal backslashes in data fields so tmux 3.2
+    /// The CLI query doubles literal backslashes in data fields so tmux 3.4
     /// through 3.5 can be normalized before parsing:
     ///
     /// ```text

@@ -69,7 +69,7 @@ impl FromStr for Pane {
     /// are therefore allowed to contain either delimiter or newline. This
     /// parser accepts only this raw framed format.
     ///
-    /// The CLI query doubles literal backslashes in data fields so tmux 3.2
+    /// The CLI query doubles literal backslashes in data fields so tmux 3.4
     /// through 3.5 can be normalized before parsing:
     ///
     /// ```text

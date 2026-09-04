@@ -12,10 +12,10 @@ pub(crate) const RECORD_SEPARATOR: u8 = b'\n';
 
 /// Normalize tmux command output to raw framed-record bytes.
 ///
-/// tmux 3.2 through 3.5 visually escapes command output with `vis(3)`, while
-/// newer versions preserve raw bytes. Command formats double every literal
-/// backslash in data fields before tmux emits them, making the legacy escapes
-/// unambiguous on every supported version.
+/// Only tmux 3.4 and 3.5 visually escape command output with `vis(3)`; 3.2 and
+/// 3.3a emit raw bytes, and so do 3.6 and later. Command formats double every
+/// literal backslash in data fields before tmux emits them, making the escapes
+/// of that middle range unambiguous on every supported version.
 pub(crate) fn normalize_tmux_output(input: &[u8]) -> Result<Vec<u8>, ByteParseError> {
     let mut output = Vec::with_capacity(input.len());
     let mut position = 0;
