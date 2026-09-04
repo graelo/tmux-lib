@@ -1,0 +1,121 @@
+//! Server-level operations: lifecycle and options.
+
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
+
+use crate::{
+    Result,
+    error::{Error, check_empty_process_output},
+    tmux::Tmux,
+    wire::options::parse_options,
+};
+
+/// Maximum time to wait for the server to become ready.
+const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Delay between readiness checks.
+const SERVER_READY_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+impl Tmux {
+    /// Start the tmux server if needed, creating a session named
+    /// `initial_session_name` in order to keep the server running.
+    ///
+    /// This waits for the server to be fully ready before returning, so a
+    /// subsequent command can be issued immediately.
+    pub fn start_server(&self, initial_session_name: &str) -> Result<()> {
+        let output = self.output(&["new-session", "-d", "-s", initial_session_name])?;
+        check_empty_process_output(&output, "new-session")?;
+
+        self.wait_for_server_ready()
+    }
+
+    /// Poll the server with `list-sessions` until it answers or the deadline
+    /// passes.
+    fn wait_for_server_ready(&self) -> Result<()> {
+        let deadline = Instant::now() + SERVER_READY_TIMEOUT;
+
+        loop {
+            if self.output(&["list-sessions"])?.status.success() {
+                return Ok(());
+            }
+
+            if Instant::now() >= deadline {
+                return Err(Error::UnexpectedTmuxOutput {
+                    intent: "wait-for-server-ready",
+                    stdout: String::new(),
+                    stderr: format!("server did not become ready within {SERVER_READY_TIMEOUT:?}"),
+                });
+            }
+
+            std::thread::sleep(SERVER_READY_POLL_INTERVAL);
+        }
+    }
+
+    /// Remove the session exactly named `name`.
+    pub fn kill_session(&self, name: &str) -> Result<()> {
+        let exact_name = format!("={name}");
+
+        let output = self.output(&["kill-session", "-t", &exact_name])?;
+        check_empty_process_output(&output, "kill-session")
+    }
+
+    /// Return the value of one tmux option.
+    pub fn show_option(&self, option_name: &str, global: bool) -> Result<Option<String>> {
+        let mut args = vec!["show-options", "-w", "-q"];
+        if global {
+            args.push("-g");
+        }
+        args.push(option_name);
+
+        let output = self.output(&args)?;
+        let buffer = String::from_utf8(output.stdout)?;
+        let buffer = buffer.trim_end();
+
+        if buffer.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(buffer.to_string()))
+    }
+
+    /// Return every tmux option as a `HashMap`.
+    pub fn show_options(&self, global: bool) -> Result<HashMap<String, String>> {
+        let args = if global {
+            vec!["show-options", "-g"]
+        } else {
+            vec!["show-options"]
+        };
+
+        let output = self.output(&args)?;
+        let buffer = String::from_utf8(output.stdout)?;
+
+        Ok(parse_options(&buffer))
+    }
+
+    /// Return the `default-command` used to start a pane, falling back to
+    /// `default-shell` when unset.
+    ///
+    /// In the case of bash, a `-l` flag is added.
+    pub fn default_command(&self) -> Result<String> {
+        let all_options = self.show_options(true)?;
+
+        let default_shell = all_options
+            .get("default-shell")
+            .ok_or(Error::TmuxConfig("no default-shell"))
+            .map(|cmd| cmd.to_owned())
+            .map(|cmd| {
+                if cmd.ends_with("bash") {
+                    format!("-l {cmd}")
+                } else {
+                    cmd
+                }
+            })?;
+
+        all_options
+            .get("default-command")
+            .or(Some(&default_shell))
+            .ok_or(Error::TmuxConfig("no default-command nor default-shell"))
+            .map(|cmd| cmd.to_owned())
+    }
+}

@@ -53,9 +53,6 @@ derived_format!(PANE_FORMAT, PANE_INTENT, PANE_FIELDS);
 derived_format!(WINDOW_FORMAT, WINDOW_INTENT, WINDOW_FIELDS);
 derived_format!(SESSION_FORMAT, SESSION_INTENT, SESSION_FIELDS);
 
-/// Format asked of `list-sessions` when only probing server readiness.
-pub(crate) const SESSION_NAME_FORMAT: &str = "#{session_name}";
-
 /// Formats asked of the creation commands via `-P -F`, which report the ids of
 /// what they just created. These are not framed records: tmux ids cannot
 /// contain `:`, so a plain join is unambiguous.
