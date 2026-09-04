@@ -18,14 +18,16 @@ use crate::{
     layout::{self, window_layout},
     pane::Pane,
     pane_id::{PaneId, parse::pane_id},
-    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, normalize_tmux_output},
     session::Session,
     window_id::{WindowId, parse::window_id},
+    wire::{
+        ByteParseError, RecordReader, decode_all, decode_one,
+        formats::{
+            NEW_WINDOW_FORMAT, NEW_WINDOW_INTENT, WINDOW_FIELDS, WINDOW_FORMAT, WINDOW_INTENT,
+        },
+        normalize_tmux_output,
+    },
 };
-
-/// Format used by [`available_windows`] for one window per newline-terminated record.
-const WINDOW_LIST_FORMAT: &str = "#{window_id}\x1f#{window_index}\x1f#{?window_active,true,false}\x1f#{window_layout}\x1f#{n:window_name}\x1f#{s|\\\\|\\\\\\\\|:window_name}\x1f#{n:window_linked_sessions_list}\x1f#{s|\\\\|\\\\\\\\|:window_linked_sessions_list}";
-const WINDOW_LIST_INTENT: &str = "#{window_id}\\x1f#{window_index}\\x1f#{?window_active,true,false}\\x1f#{window_layout}\\x1f#{n:window_name}\\x1f#{s|\\\\|\\\\\\\\|:window_name}\\x1f#{n:window_linked_sessions_list}\\x1f#{s|\\\\|\\\\\\\\|:window_linked_sessions_list}\\n";
 
 /// A Tmux window.
 ///
@@ -98,8 +100,8 @@ impl FromStr for Window {
     /// For definitions, look at `Window` type and the tmux man page for
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
-        parse::framed_window(input.as_bytes())
-            .map_err(|e| map_byte_parse_error("Window", WINDOW_LIST_INTENT, e))
+        decode_one(input.as_bytes(), WINDOW_FIELDS, Window::decode)
+            .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))
     }
 }
 
@@ -111,61 +113,25 @@ impl Window {
     }
 }
 
-mod parse {
-    use super::*;
-
-    pub(super) fn framed_window(input: &[u8]) -> std::result::Result<Window, ByteParseError> {
-        let mut cursor = ByteCursor::new(input);
-        let window = framed_window_record(&mut cursor)?;
-        if !cursor.is_at_end() {
-            return Err(ByteParseError::new(
-                "unexpected trailing bytes after window record",
-            ));
-        }
-        Ok(window)
-    }
-
-    pub(super) fn framed_windows(input: &[u8]) -> Result<Vec<Window>> {
-        let mut cursor = ByteCursor::new(input);
-        let mut windows = Vec::new();
-        while !cursor.is_at_end() {
-            windows.push(
-                framed_window_record(&mut cursor)
-                    .map_err(|e| map_byte_parse_error("Window", WINDOW_LIST_INTENT, e))?,
-            );
-        }
-        Ok(windows)
-    }
-
-    fn framed_window_record(
-        cursor: &mut ByteCursor<'_>,
-    ) -> std::result::Result<Window, ByteParseError> {
-        let id = cursor
-            .take_token_str("window ID")?
+impl Window {
+    /// Build a `Window` from one framed record, reading the fields declared in
+    /// [`WINDOW_FIELDS`].
+    fn decode(reader: &mut RecordReader<'_, '_>) -> std::result::Result<Window, ByteParseError> {
+        let id = reader
+            .token("window ID")?
             .parse()
             .map_err(|_| ByteParseError::new("invalid window ID"))?;
-        let index = cursor
-            .take_token_str("window index")?
+        let index = reader
+            .token("window index")?
             .parse()
             .map_err(|_| ByteParseError::new("invalid window index"))?;
-        let is_active = match cursor.take_token_str("window active flag")? {
-            "true" => true,
-            "false" => false,
-            _ => return Err(ByteParseError::new("invalid window active flag")),
-        };
-        let layout_text = cursor.take_token_str("window layout")?;
+        let is_active = reader.flag("window active flag")?;
+        let layout_text = reader.token("window layout")?;
         all_consuming(window_layout)
             .parse(layout_text)
             .map_err(|_| ByteParseError::new("invalid window layout"))?;
-        let name = cursor.take_length_prefixed_string(FIELD_SEPARATOR, "window name")?;
-        if name.is_empty() {
-            return Err(ByteParseError::new("window name is empty"));
-        }
-        let session_names =
-            cursor.take_length_prefixed_string(RECORD_SEPARATOR, "linked session names")?;
-        if session_names.is_empty() {
-            return Err(ByteParseError::new("linked session names are empty"));
-        }
+        let name = reader.required_data("window name")?;
+        let session_names = reader.required_data("linked session names")?;
 
         Ok(Window {
             id,
@@ -184,13 +150,14 @@ mod parse {
 
 /// Return a list of all `Window` from all sessions.
 pub async fn available_windows() -> Result<Vec<Window>> {
-    let args = vec!["list-windows", "-a", "-F", WINDOW_LIST_FORMAT];
+    let args = vec!["list-windows", "-a", "-F", WINDOW_FORMAT.as_str()];
 
     let output = Command::new("tmux").args(&args).output().await?;
     check_process_success(&output, "list-windows")?;
     let stdout = normalize_tmux_output(&output.stdout)
-        .map_err(|e| map_byte_parse_error("Window", WINDOW_LIST_INTENT, e))?;
-    parse::framed_windows(&stdout)
+        .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))?;
+    decode_all(&stdout, WINDOW_FIELDS, Window::decode)
+        .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))
 }
 
 /// Create a Tmux window in a session exactly named as the passed `session`.
@@ -223,7 +190,7 @@ pub async fn new_window(
         target_session,
         "-P",
         "-F",
-        "#{window_id}:#{pane_id}",
+        NEW_WINDOW_FORMAT,
     ];
     if let Some(pane_command) = pane_command {
         args.push(pane_command);
@@ -239,7 +206,7 @@ pub async fn new_window(
     let buffer = buffer.trim_end();
 
     let desc = "new-window";
-    let intent = "##{window_id}:##{pane_id}";
+    let intent = NEW_WINDOW_INTENT;
 
     let (_, (new_window_id, _, new_pane_id)) = all_consuming((window_id, char(':'), pane_id))
         .parse(buffer)
@@ -268,8 +235,14 @@ pub async fn select_window(window_id: &WindowId) -> Result<()> {
 mod tests {
     use super::Window;
     use super::WindowId;
-    use super::parse;
-    use super::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+    use crate::wire::decode_all;
+    use crate::wire::formats::{WINDOW_FIELDS, WINDOW_INTENT};
+    use crate::wire::framing::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+
+    fn decode_all_test(input: &[u8]) -> crate::Result<Vec<Window>> {
+        decode_all(input, WINDOW_FIELDS, Window::decode)
+            .map_err(|e| crate::error::map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))
+    }
     use crate::Result;
     use crate::pane_id::PaneId;
     use std::str::FromStr;
@@ -538,11 +511,11 @@ mod tests {
         let invalid_utf8 = framed_window_record(&[0xff], b"session");
 
         for record in [missing_terminator, trailing_bytes, invalid_utf8] {
-            assert!(parse::framed_windows(&record).is_err());
+            assert!(decode_all_test(&record).is_err());
         }
 
         let invalid_length =
             b"@5\x1f0\x1ftrue\x1f64f0,334x85,0,0,11\x1fnot-a-number\x1fname\x1f7\x1fsession\n";
-        assert!(parse::framed_windows(invalid_length).is_err());
+        assert!(decode_all_test(invalid_length).is_err());
     }
 }
