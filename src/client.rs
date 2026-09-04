@@ -3,7 +3,7 @@
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use smol::process::Command;
+use std::process::Command;
 
 use crate::{
     Result,
@@ -80,10 +80,10 @@ impl Client {
 /// # Errors
 ///
 /// Returns an error if tmux fails or emits a malformed client record.
-pub async fn current() -> Result<Client> {
+pub fn current() -> Result<Client> {
     let args = vec!["display-message", "-p", "-F", CLIENT_FORMAT.as_str()];
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     check_process_success(&output, "display-message")?;
     let stdout = normalize_tmux_output(&output.stdout)
         .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))?;
@@ -99,7 +99,7 @@ pub async fn current() -> Result<Client> {
 pub fn display_message(message: &str) {
     let args = vec!["display-message", message];
 
-    std::process::Command::new("tmux")
+    Command::new("tmux")
         .args(&args)
         .output()
         .expect("Cannot communicate with Tmux for displaying message");
@@ -110,14 +110,13 @@ pub fn display_message(message: &str) {
 /// # Panics
 ///
 /// This function panics if it can't communicate with Tmux.
-pub async fn switch_client(session_name: &str) -> Result<()> {
+pub fn switch_client(session_name: &str) -> Result<()> {
     let exact_session_name = format!("={session_name}");
     let args = vec!["switch-client", "-t", &exact_session_name];
 
     Command::new("tmux")
         .args(&args)
         .output()
-        .await
         .expect("Cannot communicate with Tmux for switching the client");
 
     Ok(())

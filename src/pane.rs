@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use smol::process::Command;
+use std::process::Command;
 
 use crate::{
     Result,
@@ -92,7 +92,7 @@ impl Pane {
     /// The output contains the escape codes, joined lines with trailing spaces. This output is
     /// processed by the function `tmux_lib::utils::cleanup_captured_buffer`.
     ///
-    pub async fn capture(&self) -> Result<Vec<u8>> {
+    pub fn capture(&self) -> Result<Vec<u8>> {
         let args = vec![
             "capture-pane",
             "-t",
@@ -106,7 +106,7 @@ impl Pane {
             "-",  // end of history
         ];
 
-        let output = Command::new("tmux").args(&args).output().await?;
+        let output = Command::new("tmux").args(&args).output()?;
 
         Ok(output.stdout)
     }
@@ -145,10 +145,10 @@ impl Pane {
 // ------------------------------
 
 /// Return a list of all `Pane` from all sessions.
-pub async fn available_panes() -> Result<Vec<Pane>> {
+pub fn available_panes() -> Result<Vec<Pane>> {
     let args = vec!["list-panes", "-a", "-F", PANE_FORMAT.as_str()];
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     check_process_success(&output, "list-panes")?;
     let stdout = normalize_tmux_output(&output.stdout)
         .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))?;
@@ -158,7 +158,7 @@ pub async fn available_panes() -> Result<Vec<Pane>> {
 
 /// Create a new pane (horizontal split) in the window with `window_id`, and return the new
 /// pane id.
-pub async fn new_pane(
+pub fn new_pane(
     reference_pane: &Pane,
     pane_command: Option<&str>,
     window_id: &WindowId,
@@ -178,7 +178,7 @@ pub async fn new_pane(
         args.push(pane_command);
     }
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
 
     // Check exit status before parsing to avoid confusing parse errors
     // when tmux fails and returns empty/garbage stdout.
@@ -191,10 +191,10 @@ pub async fn new_pane(
 }
 
 /// Select (make active) the pane with `pane_id`.
-pub async fn select_pane(pane_id: &PaneId) -> Result<()> {
+pub fn select_pane(pane_id: &PaneId) -> Result<()> {
     let args = vec!["select-pane", "-t", pane_id.as_str()];
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     check_empty_process_output(&output, "select-pane")
 }
 

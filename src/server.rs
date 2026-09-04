@@ -1,8 +1,10 @@
 //! Server management.
 
-use std::{collections::HashMap, time::Duration};
-
-use smol::{Timer, future, process::Command};
+use std::{
+    collections::HashMap,
+    process::Command,
+    time::{Duration, Instant},
+};
 
 use crate::{
     Result,
@@ -27,69 +29,62 @@ const SERVER_READY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// subsequent commands can be executed immediately.
 ///
 /// It is ok-ish to already have an existing session named `"[placeholder]"`.
-pub async fn start(initial_session_name: &str) -> Result<()> {
+pub fn start(initial_session_name: &str) -> Result<()> {
     let args = vec!["new-session", "-d", "-s", initial_session_name];
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     check_empty_process_output(&output, "new-session")?;
 
     // Wait for the server to be fully ready to accept commands.
-    wait_for_server_ready().await
+    wait_for_server_ready()
 }
 
 /// Wait for the tmux server to be ready to accept commands.
 ///
 /// This polls the server using `tmux list-sessions` until it succeeds or times out.
-async fn wait_for_server_ready() -> Result<()> {
-    let poll = async {
-        loop {
-            let output = Command::new("tmux")
-                .args(["list-sessions", "-F", SESSION_NAME_FORMAT])
-                .output()
-                .await?;
+fn wait_for_server_ready() -> Result<()> {
+    let deadline = Instant::now() + SERVER_READY_TIMEOUT;
 
-            if output.status.success() {
-                return Ok(());
-            }
+    loop {
+        let output = Command::new("tmux")
+            .args(["list-sessions", "-F", SESSION_NAME_FORMAT])
+            .output()?;
 
-            Timer::after(SERVER_READY_POLL_INTERVAL).await;
+        if output.status.success() {
+            return Ok(());
         }
-    };
 
-    let timeout = async {
-        Timer::after(SERVER_READY_TIMEOUT).await;
-        Err(Error::UnexpectedTmuxOutput {
-            intent: "wait-for-server-ready",
-            stdout: String::new(),
-            stderr: format!(
-                "server did not become ready within {:?}",
-                SERVER_READY_TIMEOUT
-            ),
-        })
-    };
+        if Instant::now() >= deadline {
+            return Err(Error::UnexpectedTmuxOutput {
+                intent: "wait-for-server-ready",
+                stdout: String::new(),
+                stderr: format!("server did not become ready within {SERVER_READY_TIMEOUT:?}"),
+            });
+        }
 
-    future::or(poll, timeout).await
+        std::thread::sleep(SERVER_READY_POLL_INTERVAL);
+    }
 }
 
 /// Remove the session named `"[placeholder]"` used to keep the server alive.
-pub async fn kill_session(name: &str) -> Result<()> {
+pub fn kill_session(name: &str) -> Result<()> {
     let exact_name = format!("={name}");
     let args = vec!["kill-session", "-t", &exact_name];
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     check_empty_process_output(&output, "kill-session")
 }
 
 /// Return the value of a Tmux option. For instance, this can be used to get Tmux's default
 /// command.
-pub async fn show_option(option_name: &str, global: bool) -> Result<Option<String>> {
+pub fn show_option(option_name: &str, global: bool) -> Result<Option<String>> {
     let mut args = vec!["show-options", "-w", "-q"];
     if global {
         args.push("-g");
     }
     args.push(option_name);
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     let buffer = String::from_utf8(output.stdout)?;
     let buffer = buffer.trim_end();
 
@@ -100,14 +95,14 @@ pub async fn show_option(option_name: &str, global: bool) -> Result<Option<Strin
 }
 
 /// Return all Tmux options as a `HashMap`.
-pub async fn show_options(global: bool) -> Result<HashMap<String, String>> {
+pub fn show_options(global: bool) -> Result<HashMap<String, String>> {
     let args = if global {
         vec!["show-options", "-g"]
     } else {
         vec!["show-options"]
     };
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     let buffer = String::from_utf8(output.stdout)?;
 
     Ok(parse_options(&buffer))
@@ -131,8 +126,8 @@ fn parse_options(buffer: &str) -> HashMap<String, String> {
 /// Return the `"default-command"` used to start a pane, falling back to `"default shell"` if none.
 ///
 /// In case of bash, a `-l` flag is added.
-pub async fn default_command() -> Result<String> {
-    let all_options = show_options(true).await?;
+pub fn default_command() -> Result<String> {
+    let all_options = show_options(true)?;
 
     let default_shell = all_options
         .get("default-shell")
