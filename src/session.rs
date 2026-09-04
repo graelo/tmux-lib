@@ -7,7 +7,7 @@ use std::{path::PathBuf, str::FromStr};
 
 use nom::{Parser, character::complete::char, combinator::all_consuming};
 use serde::{Deserialize, Serialize};
-use smol::process::Command;
+use std::process::Command;
 
 use crate::{
     Result,
@@ -111,10 +111,10 @@ impl Session {
 // ------------------------------
 
 /// Return a list of all `Session` from the current tmux session.
-pub async fn available_sessions() -> Result<Vec<Session>> {
+pub fn available_sessions() -> Result<Vec<Session>> {
     let args = vec!["list-sessions", "-F", SESSION_FORMAT.as_str()];
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     check_process_success(&output, "list-sessions")?;
     let stdout = normalize_tmux_output(&output.stdout)
         .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))?;
@@ -129,7 +129,7 @@ pub async fn available_sessions() -> Result<Vec<Session>> {
 /// - the session name is taken from the passed `session`
 /// - the working directory is taken from the pane's working directory.
 ///
-pub async fn new_session(
+pub fn new_session(
     session: &Session,
     window: &Window,
     pane: &Pane,
@@ -152,7 +152,7 @@ pub async fn new_session(
         args.push(pane_command);
     }
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
 
     // Check exit status before parsing to avoid confusing parse errors
     // when tmux fails and returns empty/garbage stdout.

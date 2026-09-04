@@ -63,11 +63,6 @@ fn tmux_available() -> bool {
     Command::new("tmux").arg("-V").output().is_ok()
 }
 
-/// Helper to run async tests with smol.
-fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
-    smol::block_on(future)
-}
-
 // ============================================================================
 // Server Tests
 // ============================================================================
@@ -85,25 +80,23 @@ mod server_tests {
         let session_name = unique_session_name("server");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Start a new session
-            let result = server::start(&session_name).await;
-            assert!(result.is_ok(), "Failed to start session: {:?}", result);
+        // Start a new session
+        let result = server::start(&session_name);
+        assert!(result.is_ok(), "Failed to start session: {:?}", result);
 
-            // Verify the session exists
-            let sessions = session::available_sessions().await.unwrap();
-            let found = sessions.iter().any(|s| s.name == session_name);
-            assert!(found, "Session '{}' should exist", session_name);
+        // Verify the session exists
+        let sessions = session::available_sessions().unwrap();
+        let found = sessions.iter().any(|s| s.name == session_name);
+        assert!(found, "Session '{}' should exist", session_name);
 
-            // Kill the session
-            let result = server::kill_session(&session_name).await;
-            assert!(result.is_ok(), "Failed to kill session: {:?}", result);
+        // Kill the session
+        let result = server::kill_session(&session_name);
+        assert!(result.is_ok(), "Failed to kill session: {:?}", result);
 
-            // Verify the session is gone
-            let sessions = session::available_sessions().await.unwrap_or_default();
-            let found = sessions.iter().any(|s| s.name == session_name);
-            assert!(!found, "Session '{}' should be gone", session_name);
-        });
+        // Verify the session is gone
+        let sessions = session::available_sessions().unwrap_or_default();
+        let found = sessions.iter().any(|s| s.name == session_name);
+        assert!(!found, "Session '{}' should be gone", session_name);
     }
 
     #[test]
@@ -116,18 +109,16 @@ mod server_tests {
         let session_name = unique_session_name("opts");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Ensure server is running
-            let _ = server::start(&session_name).await;
+        // Ensure server is running
+        let _ = server::start(&session_name);
 
-            // Get global options
-            let options = server::show_options(true).await;
-            assert!(options.is_ok(), "Failed to get options: {:?}", options);
+        // Get global options
+        let options = server::show_options(true);
+        assert!(options.is_ok(), "Failed to get options: {:?}", options);
 
-            let options = options.unwrap();
-            // Should have some common options
-            assert!(!options.is_empty(), "Options should not be empty");
-        });
+        let options = options.unwrap();
+        // Should have some common options
+        assert!(!options.is_empty(), "Options should not be empty");
     }
 
     #[test]
@@ -140,14 +131,12 @@ mod server_tests {
         let session_name = unique_session_name("opt");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Ensure server is running
-            let _ = server::start(&session_name).await;
+        // Ensure server is running
+        let _ = server::start(&session_name);
 
-            // Get a specific option that should exist
-            let result = server::show_option("status", true).await;
-            assert!(result.is_ok(), "Failed to get option: {:?}", result);
-        });
+        // Get a specific option that should exist
+        let result = server::show_option("status", true);
+        assert!(result.is_ok(), "Failed to get option: {:?}", result);
     }
 
     #[test]
@@ -160,22 +149,20 @@ mod server_tests {
         let session_name = unique_session_name("defcmd");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Ensure server is running
-            let _ = server::start(&session_name).await;
+        // Ensure server is running
+        let _ = server::start(&session_name);
 
-            // Get default command
-            let result = server::default_command().await;
-            assert!(
-                result.is_ok(),
-                "Failed to get default command: {:?}",
-                result
-            );
+        // Get default command
+        let result = server::default_command();
+        assert!(
+            result.is_ok(),
+            "Failed to get default command: {:?}",
+            result
+        );
 
-            let cmd = result.unwrap();
-            // Should be a non-empty string (typically a shell path)
-            assert!(!cmd.is_empty(), "Default command should not be empty");
-        });
+        let cmd = result.unwrap();
+        // Should be a non-empty string (typically a shell path)
+        assert!(!cmd.is_empty(), "Default command should not be empty");
     }
 }
 
@@ -196,22 +183,20 @@ mod session_tests {
         let session_name = unique_session_name("avail");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Create a session
-            let _ = server::start(&session_name).await;
+        // Create a session
+        let _ = server::start(&session_name);
 
-            // Get available sessions
-            let sessions = session::available_sessions().await;
-            assert!(sessions.is_ok(), "Failed to get sessions: {:?}", sessions);
+        // Get available sessions
+        let sessions = session::available_sessions();
+        assert!(sessions.is_ok(), "Failed to get sessions: {:?}", sessions);
 
-            let sessions = sessions.unwrap();
-            let found = sessions.iter().find(|s| s.name == session_name);
-            assert!(found.is_some(), "Created session should be in list");
+        let sessions = sessions.unwrap();
+        let found = sessions.iter().find(|s| s.name == session_name);
+        assert!(found.is_some(), "Created session should be in list");
 
-            // Verify session has expected fields
-            let sess = found.unwrap();
-            assert_eq!(sess.name, session_name);
-        });
+        // Verify session has expected fields
+        let sess = found.unwrap();
+        assert_eq!(sess.name, session_name);
     }
 
     #[test]
@@ -226,44 +211,42 @@ mod session_tests {
         let mut guard = SessionGuard::new(&session_name);
         guard.add(&new_session_name);
 
-        block_on(async {
-            // Start initial session to ensure server is running
-            let _ = server::start(&session_name).await;
+        // Start initial session to ensure server is running
+        let _ = server::start(&session_name);
 
-            // Get windows/panes from our session to use as templates
-            let windows = window::available_windows().await.unwrap();
-            let our_window = windows
-                .iter()
-                .find(|w| w.sessions.iter().any(|s| s == &session_name));
+        // Get windows/panes from our session to use as templates
+        let windows = window::available_windows().unwrap();
+        let our_window = windows
+            .iter()
+            .find(|w| w.sessions.iter().any(|s| s == &session_name));
 
-            let panes = pane::available_panes().await.unwrap();
+        let panes = pane::available_panes().unwrap();
 
-            if let Some(window) = our_window
-                && let Some(pane) = panes.iter().find(|p| window.pane_ids().contains(&p.id))
-            {
-                // Create a template session
-                let template_session = Session {
-                    id: SessionId::from_str("$0").unwrap(),
-                    name: new_session_name.clone(),
-                    dirpath: pane.dirpath.clone(),
-                };
+        if let Some(window) = our_window
+            && let Some(pane) = panes.iter().find(|p| window.pane_ids().contains(&p.id))
+        {
+            // Create a template session
+            let template_session = Session {
+                id: SessionId::from_str("$0").unwrap(),
+                name: new_session_name.clone(),
+                dirpath: pane.dirpath.clone(),
+            };
 
-                // Create the new session
-                let result = session::new_session(&template_session, window, pane, None).await;
-                assert!(result.is_ok(), "Failed to create session: {:?}", result);
+            // Create the new session
+            let result = session::new_session(&template_session, window, pane, None);
+            assert!(result.is_ok(), "Failed to create session: {:?}", result);
 
-                let (sess_id, win_id, pane_id) = result.unwrap();
-                // Just verify they were created (IDs are opaque types)
-                let _ = sess_id;
-                assert!(win_id.as_str().starts_with('@'));
-                assert!(pane_id.as_str().starts_with('%'));
+            let (sess_id, win_id, pane_id) = result.unwrap();
+            // Just verify they were created (IDs are opaque types)
+            let _ = sess_id;
+            assert!(win_id.as_str().starts_with('@'));
+            assert!(pane_id.as_str().starts_with('%'));
 
-                // Verify the session exists
-                let sessions = session::available_sessions().await.unwrap();
-                let found = sessions.iter().any(|s| s.name == new_session_name);
-                assert!(found, "New session should exist");
-            }
-        });
+            // Verify the session exists
+            let sessions = session::available_sessions().unwrap();
+            let found = sessions.iter().any(|s| s.name == new_session_name);
+            assert!(found, "New session should exist");
+        }
     }
 }
 
@@ -284,23 +267,21 @@ mod window_tests {
         let session_name = unique_session_name("win");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Create a session (which creates a window)
-            let _ = server::start(&session_name).await;
+        // Create a session (which creates a window)
+        let _ = server::start(&session_name);
 
-            // Get available windows
-            let windows = window::available_windows().await;
-            assert!(windows.is_ok(), "Failed to get windows: {:?}", windows);
+        // Get available windows
+        let windows = window::available_windows();
+        assert!(windows.is_ok(), "Failed to get windows: {:?}", windows);
 
-            let windows = windows.unwrap();
-            assert!(!windows.is_empty(), "Should have at least one window");
+        let windows = windows.unwrap();
+        assert!(!windows.is_empty(), "Should have at least one window");
 
-            // Check window has expected fields
-            let win = &windows[0];
-            assert!(win.id.as_str().starts_with('@'));
-            assert!(!win.name.is_empty());
-            assert!(!win.layout.is_empty());
-        });
+        // Check window has expected fields
+        let win = &windows[0];
+        assert!(win.id.as_str().starts_with('@'));
+        assert!(!win.name.is_empty());
+        assert!(!win.layout.is_empty());
     }
 
     #[test]
@@ -314,48 +295,46 @@ mod window_tests {
         let _guard = SessionGuard::new(&session_name);
         let window_name = "test-window";
 
-        block_on(async {
-            // Create a session
-            let _ = server::start(&session_name).await;
+        // Create a session
+        let _ = server::start(&session_name);
 
-            // Get current session, window, and pane from our session
-            let sessions = session::available_sessions().await.unwrap();
-            let session = sessions.iter().find(|s| s.name == session_name).unwrap();
+        // Get current session, window, and pane from our session
+        let sessions = session::available_sessions().unwrap();
+        let session = sessions.iter().find(|s| s.name == session_name).unwrap();
 
-            let windows = window::available_windows().await.unwrap();
-            let our_window = windows
-                .iter()
-                .find(|w| w.sessions.iter().any(|s| s == &session_name));
+        let windows = window::available_windows().unwrap();
+        let our_window = windows
+            .iter()
+            .find(|w| w.sessions.iter().any(|s| s == &session_name));
 
-            let panes = pane::available_panes().await.unwrap();
+        let panes = pane::available_panes().unwrap();
 
-            if let Some(win) = our_window
-                && let Some(pane) = panes.iter().find(|p| win.pane_ids().contains(&p.id))
-            {
-                // Create a template window
-                let template_window = Window {
-                    id: WindowId::from_str("@0").unwrap(),
-                    index: 0,
-                    is_active: false,
-                    layout: String::new(),
-                    name: window_name.to_string(),
-                    sessions: vec![session_name.clone()],
-                };
+        if let Some(win) = our_window
+            && let Some(pane) = panes.iter().find(|p| win.pane_ids().contains(&p.id))
+        {
+            // Create a template window
+            let template_window = Window {
+                id: WindowId::from_str("@0").unwrap(),
+                index: 0,
+                is_active: false,
+                layout: String::new(),
+                name: window_name.to_string(),
+                sessions: vec![session_name.clone()],
+            };
 
-                // Create new window
-                let result = window::new_window(session, &template_window, pane, None).await;
-                assert!(result.is_ok(), "Failed to create window: {:?}", result);
+            // Create new window
+            let result = window::new_window(session, &template_window, pane, None);
+            assert!(result.is_ok(), "Failed to create window: {:?}", result);
 
-                let (win_id, pane_id) = result.unwrap();
-                assert!(win_id.as_str().starts_with('@'));
-                assert!(pane_id.as_str().starts_with('%'));
+            let (win_id, pane_id) = result.unwrap();
+            assert!(win_id.as_str().starts_with('@'));
+            assert!(pane_id.as_str().starts_with('%'));
 
-                // Verify window exists
-                let windows = window::available_windows().await.unwrap();
-                let found = windows.iter().any(|w| w.name == window_name);
-                assert!(found, "New window should exist");
-            }
-        });
+            // Verify window exists
+            let windows = window::available_windows().unwrap();
+            let found = windows.iter().any(|w| w.name == window_name);
+            assert!(found, "New window should exist");
+        }
     }
 
     #[test]
@@ -368,22 +347,20 @@ mod window_tests {
         let session_name = unique_session_name("selwin");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Create a session
-            let _ = server::start(&session_name).await;
+        // Create a session
+        let _ = server::start(&session_name);
 
-            // Get windows from our session specifically
-            let windows = window::available_windows().await.unwrap();
-            let our_window = windows
-                .iter()
-                .find(|w| w.sessions.iter().any(|s| s == &session_name));
+        // Get windows from our session specifically
+        let windows = window::available_windows().unwrap();
+        let our_window = windows
+            .iter()
+            .find(|w| w.sessions.iter().any(|s| s == &session_name));
 
-            if let Some(win) = our_window {
-                // Select the window
-                let result = window::select_window(&win.id).await;
-                assert!(result.is_ok(), "Failed to select window: {:?}", result);
-            }
-        });
+        if let Some(win) = our_window {
+            // Select the window
+            let result = window::select_window(&win.id);
+            assert!(result.is_ok(), "Failed to select window: {:?}", result);
+        }
     }
 
     #[test]
@@ -396,24 +373,22 @@ mod window_tests {
         let session_name = unique_session_name("layout");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Create a session
-            let _ = server::start(&session_name).await;
+        // Create a session
+        let _ = server::start(&session_name);
 
-            // Get windows from our session specifically
-            let windows = window::available_windows().await.unwrap();
-            let our_window = windows
-                .iter()
-                .find(|w| w.sessions.iter().any(|s| s == &session_name));
+        // Get windows from our session specifically
+        let windows = window::available_windows().unwrap();
+        let our_window = windows
+            .iter()
+            .find(|w| w.sessions.iter().any(|s| s == &session_name));
 
-            if let Some(win) = our_window {
-                // Try setting a built-in layout
-                let result = window::set_layout("even-horizontal", &win.id).await;
-                // This may fail if there's only one pane, which is fine
-                // Just verify it doesn't panic
-                let _ = result;
-            }
-        });
+        if let Some(win) = our_window {
+            // Try setting a built-in layout
+            let result = window::set_layout("even-horizontal", &win.id);
+            // This may fail if there's only one pane, which is fine
+            // Just verify it doesn't panic
+            let _ = result;
+        }
     }
 }
 
@@ -434,22 +409,20 @@ mod pane_tests {
         let session_name = unique_session_name("pane");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Create a session (which creates a pane)
-            let _ = server::start(&session_name).await;
+        // Create a session (which creates a pane)
+        let _ = server::start(&session_name);
 
-            // Get available panes
-            let panes = pane::available_panes().await;
-            assert!(panes.is_ok(), "Failed to get panes: {:?}", panes);
+        // Get available panes
+        let panes = pane::available_panes();
+        assert!(panes.is_ok(), "Failed to get panes: {:?}", panes);
 
-            let panes = panes.unwrap();
-            assert!(!panes.is_empty(), "Should have at least one pane");
+        let panes = panes.unwrap();
+        assert!(!panes.is_empty(), "Should have at least one pane");
 
-            // Check pane has expected fields
-            let p = &panes[0];
-            assert!(p.id.as_str().starts_with('%'));
-            assert!(!p.command.is_empty());
-        });
+        // Check pane has expected fields
+        let p = &panes[0];
+        assert!(p.id.as_str().starts_with('%'));
+        assert!(!p.command.is_empty());
     }
 
     #[test]
@@ -462,39 +435,37 @@ mod pane_tests {
         let session_name = unique_session_name("pane-title");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            let result = server::start(&session_name).await;
-            assert!(result.is_ok(), "Failed to start session: {:?}", result);
+        let result = server::start(&session_name);
+        assert!(result.is_ok(), "Failed to start session: {:?}", result);
 
-            let target = format!("={session_name}:0.0");
-            let result = Command::new("tmux")
-                .args(["set-option", "-p", "-t", &target, "automatic-rename", "off"])
-                .output();
-            assert!(result.is_ok(), "Failed to configure pane: {:?}", result);
-            assert!(result.unwrap().status.success());
+        let target = format!("={session_name}:0.0");
+        let result = Command::new("tmux")
+            .args(["set-option", "-p", "-t", &target, "automatic-rename", "off"])
+            .output();
+        assert!(result.is_ok(), "Failed to configure pane: {:?}", result);
+        assert!(result.unwrap().status.success());
 
-            let title = "π - Chef d'orchestre";
-            let result = Command::new("tmux")
-                .args(["select-pane", "-t", &target, "-T", title])
-                .output();
-            assert!(result.is_ok(), "Failed to set pane title: {:?}", result);
-            assert!(result.unwrap().status.success());
+        let title = "π - Chef d'orchestre";
+        let result = Command::new("tmux")
+            .args(["select-pane", "-t", &target, "-T", title])
+            .output();
+        assert!(result.is_ok(), "Failed to set pane title: {:?}", result);
+        assert!(result.unwrap().status.success());
 
-            let pane_id = Command::new("tmux")
-                .args(["list-panes", "-t", &target, "-F", "#{pane_id}"])
-                .output()
-                .expect("Failed to list test pane")
-                .stdout;
-            let pane_id = String::from_utf8(pane_id).unwrap();
-            let pane_id = pane_id.trim_end();
+        let pane_id = Command::new("tmux")
+            .args(["list-panes", "-t", &target, "-F", "#{pane_id}"])
+            .output()
+            .expect("Failed to list test pane")
+            .stdout;
+        let pane_id = String::from_utf8(pane_id).unwrap();
+        let pane_id = pane_id.trim_end();
 
-            let panes = pane::available_panes().await.unwrap();
-            let pane = panes
-                .iter()
-                .find(|pane| pane.id.as_str() == pane_id)
-                .expect("Test pane should be present");
-            assert_eq!(pane.title, title);
-        });
+        let panes = pane::available_panes().unwrap();
+        let pane = panes
+            .iter()
+            .find(|pane| pane.id.as_str() == pane_id)
+            .expect("Test pane should be present");
+        assert_eq!(pane.title, title);
     }
 
     #[test]
@@ -507,34 +478,32 @@ mod pane_tests {
         let session_name = unique_session_name("newpane");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Create a session
-            let _ = server::start(&session_name).await;
+        // Create a session
+        let _ = server::start(&session_name);
 
-            // Get windows from our session specifically
-            let windows = window::available_windows().await.unwrap();
-            let our_window = windows
-                .iter()
-                .find(|w| w.sessions.iter().any(|s| s == &session_name));
+        // Get windows from our session specifically
+        let windows = window::available_windows().unwrap();
+        let our_window = windows
+            .iter()
+            .find(|w| w.sessions.iter().any(|s| s == &session_name));
 
-            let panes = pane::available_panes().await.unwrap();
+        let panes = pane::available_panes().unwrap();
 
-            if let Some(win) = our_window
-                && let Some(p) = panes.iter().find(|p| win.pane_ids().contains(&p.id))
-            {
-                // Create new pane
-                let result = pane::new_pane(p, None, &win.id).await;
-                assert!(result.is_ok(), "Failed to create pane: {:?}", result);
+        if let Some(win) = our_window
+            && let Some(p) = panes.iter().find(|p| win.pane_ids().contains(&p.id))
+        {
+            // Create new pane
+            let result = pane::new_pane(p, None, &win.id);
+            assert!(result.is_ok(), "Failed to create pane: {:?}", result);
 
-                let new_pane_id = result.unwrap();
-                assert!(new_pane_id.as_str().starts_with('%'));
+            let new_pane_id = result.unwrap();
+            assert!(new_pane_id.as_str().starts_with('%'));
 
-                // Verify the new pane exists in the pane list
-                let panes_after = pane::available_panes().await.unwrap();
-                let found = panes_after.iter().any(|p| p.id == new_pane_id);
-                assert!(found, "New pane {} should exist", new_pane_id);
-            }
-        });
+            // Verify the new pane exists in the pane list
+            let panes_after = pane::available_panes().unwrap();
+            let found = panes_after.iter().any(|p| p.id == new_pane_id);
+            assert!(found, "New pane {} should exist", new_pane_id);
+        }
     }
 
     #[test]
@@ -547,28 +516,26 @@ mod pane_tests {
         let session_name = unique_session_name("selpane");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Create a session
-            let _ = server::start(&session_name).await;
+        // Create a session
+        let _ = server::start(&session_name);
 
-            // Get windows from our session to find its pane IDs
-            let windows = window::available_windows().await.unwrap();
-            let our_window = windows
-                .iter()
-                .find(|w| w.sessions.iter().any(|s| s == &session_name));
+        // Get windows from our session to find its pane IDs
+        let windows = window::available_windows().unwrap();
+        let our_window = windows
+            .iter()
+            .find(|w| w.sessions.iter().any(|s| s == &session_name));
 
-            if let Some(win) = our_window {
-                let our_pane_ids = win.pane_ids();
-                let panes = pane::available_panes().await.unwrap();
+        if let Some(win) = our_window {
+            let our_pane_ids = win.pane_ids();
+            let panes = pane::available_panes().unwrap();
 
-                // Find a pane that belongs to our window
-                if let Some(p) = panes.iter().find(|p| our_pane_ids.contains(&p.id)) {
-                    // Select the pane
-                    let result = pane::select_pane(&p.id).await;
-                    assert!(result.is_ok(), "Failed to select pane: {:?}", result);
-                }
+            // Find a pane that belongs to our window
+            if let Some(p) = panes.iter().find(|p| our_pane_ids.contains(&p.id)) {
+                // Select the pane
+                let result = pane::select_pane(&p.id);
+                assert!(result.is_ok(), "Failed to select pane: {:?}", result);
             }
-        });
+        }
     }
 
     #[test]
@@ -581,31 +548,29 @@ mod pane_tests {
         let session_name = unique_session_name("capture");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Create a session
-            let _ = server::start(&session_name).await;
+        // Create a session
+        let _ = server::start(&session_name);
 
-            // Get windows from our session to find its pane IDs
-            let windows = window::available_windows().await.unwrap();
-            let our_window = windows
-                .iter()
-                .find(|w| w.sessions.iter().any(|s| s == &session_name));
+        // Get windows from our session to find its pane IDs
+        let windows = window::available_windows().unwrap();
+        let our_window = windows
+            .iter()
+            .find(|w| w.sessions.iter().any(|s| s == &session_name));
 
-            if let Some(win) = our_window {
-                let our_pane_ids = win.pane_ids();
-                let panes = pane::available_panes().await.unwrap();
+        if let Some(win) = our_window {
+            let our_pane_ids = win.pane_ids();
+            let panes = pane::available_panes().unwrap();
 
-                // Find a pane that belongs to our window
-                if let Some(p) = panes.iter().find(|p| our_pane_ids.contains(&p.id)) {
-                    // Capture pane content
-                    let result = p.capture().await;
-                    assert!(result.is_ok(), "Failed to capture pane: {:?}", result);
+            // Find a pane that belongs to our window
+            if let Some(p) = panes.iter().find(|p| our_pane_ids.contains(&p.id)) {
+                // Capture pane content
+                let result = p.capture();
+                assert!(result.is_ok(), "Failed to capture pane: {:?}", result);
 
-                    // Result is raw bytes, just verify it doesn't error
-                    let _content = result.unwrap();
-                }
+                // Result is raw bytes, just verify it doesn't error
+                let _content = result.unwrap();
             }
-        });
+        }
     }
 }
 
@@ -626,28 +591,26 @@ mod window_pane_ids_tests {
         let session_name = unique_session_name("paneids");
         let _guard = SessionGuard::new(&session_name);
 
-        block_on(async {
-            // Create a session
-            let _ = server::start(&session_name).await;
+        // Create a session
+        let _ = server::start(&session_name);
 
-            // Get windows from our session specifically
-            let windows = window::available_windows().await.unwrap();
-            let our_window = windows
-                .iter()
-                .find(|w| w.sessions.iter().any(|s| s == &session_name));
+        // Get windows from our session specifically
+        let windows = window::available_windows().unwrap();
+        let our_window = windows
+            .iter()
+            .find(|w| w.sessions.iter().any(|s| s == &session_name));
 
-            if let Some(win) = our_window {
-                // Get pane IDs from window layout
-                let pane_ids = win.pane_ids();
-                assert!(!pane_ids.is_empty(), "Window should have at least one pane");
+        if let Some(win) = our_window {
+            // Get pane IDs from window layout
+            let pane_ids = win.pane_ids();
+            assert!(!pane_ids.is_empty(), "Window should have at least one pane");
 
-                // Verify pane IDs match actual panes
-                let panes = pane::available_panes().await.unwrap();
-                for pane_id in &pane_ids {
-                    let found = panes.iter().any(|p| &p.id == pane_id);
-                    assert!(found, "Pane ID {:?} should exist in panes list", pane_id);
-                }
+            // Verify pane IDs match actual panes
+            let panes = pane::available_panes().unwrap();
+            for pane_id in &pane_ids {
+                let found = panes.iter().any(|p| &p.id == pane_id);
+                assert!(found, "Pane ID {:?} should exist in panes list", pane_id);
             }
-        });
+        }
     }
 }

@@ -4,7 +4,7 @@
 
 use std::str::FromStr;
 
-use smol::process::Command;
+use std::process::Command;
 
 use nom::{Parser, character::complete::char, combinator::all_consuming};
 use serde::{Deserialize, Serialize};
@@ -149,10 +149,10 @@ impl Window {
 // ------------------------------
 
 /// Return a list of all `Window` from all sessions.
-pub async fn available_windows() -> Result<Vec<Window>> {
+pub fn available_windows() -> Result<Vec<Window>> {
     let args = vec!["list-windows", "-a", "-F", WINDOW_FORMAT.as_str()];
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     check_process_success(&output, "list-windows")?;
     let stdout = normalize_tmux_output(&output.stdout)
         .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))?;
@@ -168,7 +168,7 @@ pub async fn available_windows() -> Result<Vec<Window>> {
 /// - the window name is taken from the passed `window`
 /// - the working directory is the pane's working directory.
 ///
-pub async fn new_window(
+pub fn new_window(
     session: &Session,
     window: &Window,
     pane: &Pane,
@@ -196,7 +196,7 @@ pub async fn new_window(
         args.push(pane_command);
     }
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
 
     // Check exit status before parsing to avoid confusing parse errors
     // when tmux fails and returns empty/garbage stdout.
@@ -216,18 +216,18 @@ pub async fn new_window(
 }
 
 /// Apply the provided `layout` to the window with `window_id`.
-pub async fn set_layout(layout: &str, window_id: &WindowId) -> Result<()> {
+pub fn set_layout(layout: &str, window_id: &WindowId) -> Result<()> {
     let args = vec!["select-layout", "-t", window_id.as_str(), layout];
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     check_empty_process_output(&output, "select-layout")
 }
 
 /// Select (make active) the window with `window_id`.
-pub async fn select_window(window_id: &WindowId) -> Result<()> {
+pub fn select_window(window_id: &WindowId) -> Result<()> {
     let args = vec!["select-window", "-t", window_id.as_str()];
 
-    let output = Command::new("tmux").args(&args).output().await?;
+    let output = Command::new("tmux").args(&args).output()?;
     check_empty_process_output(&output, "select-window")
 }
 
