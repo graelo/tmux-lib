@@ -25,13 +25,31 @@ impl Spawning {
         &self.server
     }
 
-    /// Arguments that precede every command, addressing the server to talk to.
+    /// Arguments that precede every command.
+    ///
+    /// `-u` forces UTF-8. Without it tmux takes the flag from the locale, and
+    /// `server_client_print` runs `utf8_sanitize` for a client that lacks it,
+    /// replacing every non-ASCII byte with `_`. That silently mangles titles
+    /// and paths whenever the caller runs without `LANG`/`LC_*`, as a daemon
+    /// or a cron job does.
+    ///
+    /// Reproduced on tmux 3.7c, where a pane titled `π-test` reads back as
+    /// `_-test`:
+    ///
+    /// ```sh
+    /// env -i PATH="$PATH" HOME="$HOME" tmux -L probe new-session -d
+    /// env -i PATH="$PATH" HOME="$HOME" tmux -L probe select-pane -T 'π-test'
+    /// env -i PATH="$PATH" HOME="$HOME" tmux -L probe    list-panes -F '#{pane_title}'
+    /// env -i PATH="$PATH" HOME="$HOME" tmux -L probe -u list-panes -F '#{pane_title}'
+    /// ```
     fn prefix(&self) -> Vec<&str> {
+        let mut prefix = vec!["-u"];
         match &self.server {
-            Server::Default => Vec::new(),
-            Server::SocketName(name) => vec!["-L", name],
-            Server::SocketPath(path) => vec!["-S", path],
+            Server::Default => {}
+            Server::SocketName(name) => prefix.extend(["-L", name]),
+            Server::SocketPath(path) => prefix.extend(["-S", path]),
         }
+        prefix
     }
 
     /// Build the full argument vector actually handed to `tmux`.
@@ -54,7 +72,10 @@ mod tests {
     fn the_default_server_needs_no_addressing() {
         let spawning = Spawning::new(Server::Default);
 
-        assert_eq!(spawning.argv(&["list-panes", "-a"]), ["list-panes", "-a"]);
+        assert_eq!(
+            spawning.argv(&["list-panes", "-a"]),
+            ["-u", "list-panes", "-a"]
+        );
     }
 
     #[test]
@@ -63,7 +84,7 @@ mod tests {
 
         assert_eq!(
             spawning.argv(&["list-panes"]),
-            ["-L", "bench", "list-panes"]
+            ["-u", "-L", "bench", "list-panes"]
         );
     }
 
@@ -73,7 +94,18 @@ mod tests {
 
         assert_eq!(
             spawning.argv(&["kill-server"]),
-            ["-S", "/tmp/tmux.sock", "kill-server"]
+            ["-u", "-S", "/tmp/tmux.sock", "kill-server"]
         );
+    }
+
+    #[test]
+    fn every_invocation_forces_utf8() {
+        for server in [
+            Server::Default,
+            Server::socket_name("s"),
+            Server::socket_path("/tmp/s"),
+        ] {
+            assert_eq!(Spawning::new(server).argv(&["list-panes"])[0], "-u");
+        }
     }
 }
