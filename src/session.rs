@@ -70,7 +70,7 @@ impl FromStr for Session {
     /// $4\x1f12\x1ftmux-hacking\x1f18\x1f/Users/graelo/tmux\n
     /// ```
     ///
-    /// The CLI query doubles literal backslashes in data fields so tmux 3.2
+    /// The CLI query doubles literal backslashes in data fields so tmux 3.4
     /// through 3.5 can be normalized before parsing:
     ///
     /// ```text

@@ -45,7 +45,7 @@ impl FromStr for Client {
     /// 15\x1fcurrent-session\x1f12\x1flast-session\n
     /// ```
     ///
-    /// The CLI query doubles literal backslashes in data fields so tmux 3.2
+    /// The CLI query doubles literal backslashes in data fields so tmux 3.4
     /// through 3.5 can be normalized before parsing:
     ///
     /// ```text
