@@ -88,7 +88,7 @@ mod tests {
             Err(Error::ParseError {
                 desc: "SessionId",
                 intent: "##{session_id}",
-                err: _
+                message: _
             })
         ));
     }

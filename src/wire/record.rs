@@ -259,4 +259,61 @@ mod tests {
         assert!(decode_one(b"%1\x1ftrue\x1f0\x1f\n", FIELDS, decode_required).is_err());
         assert!(decode_one(b"%1\x1ftrue\x1f0\x1f\n", FIELDS, decode).is_ok());
     }
+
+    // These three came from doctests on `Pane`, `Window` and `Session`. They
+    // assert the framed protocol round-trips, which is a property of the wire,
+    // not of the model types.
+
+    #[test]
+    fn decodes_a_pane_record() {
+        use crate::pane::Pane;
+        use crate::wire::formats::PANE_FIELDS;
+
+        let record = b"%20\x1f0\x1ffalse\x1f4\x1frmbp\x1f4\x1fnvim\x1f35\x1f/Users/graelo/code/rust/tmux-backup\n";
+
+        let pane = decode_one(record, PANE_FIELDS, Pane::decode).unwrap();
+
+        assert_eq!(pane.id.as_str(), "%20");
+        assert_eq!(pane.index, 0);
+        assert!(!pane.is_active);
+        assert_eq!(pane.title, "rmbp");
+        assert_eq!(pane.command, "nvim");
+        assert_eq!(
+            pane.dirpath.to_str().unwrap(),
+            "/Users/graelo/code/rust/tmux-backup"
+        );
+    }
+
+    #[test]
+    fn decodes_a_window_record() {
+        use crate::window::Window;
+        use crate::wire::formats::WINDOW_FIELDS;
+
+        let record = b"@5\x1f0\x1ftrue\x1f64f0,334x85,0,0,11\x1f3\x1fben\x1f4\x1frust\n";
+
+        let window = decode_one(record, WINDOW_FIELDS, Window::decode).unwrap();
+
+        assert_eq!(window.id.as_str(), "@5");
+        assert_eq!(window.index, 0);
+        assert!(window.is_active);
+        assert_eq!(window.name, "ben");
+        assert_eq!(window.sessions, vec!["rust".to_owned()]);
+    }
+
+    #[test]
+    fn decodes_a_session_record() {
+        use crate::session::Session;
+        use crate::wire::formats::SESSION_FIELDS;
+
+        let record = b"$1\x1f7\x1fpytorch\x1f24\x1f/Users/graelo/ml/pytorch\n";
+
+        let session = decode_one(record, SESSION_FIELDS, Session::decode).unwrap();
+
+        assert_eq!(session.id.as_str(), "$1");
+        assert_eq!(session.name, "pytorch");
+        assert_eq!(
+            session.dirpath.to_str().unwrap(),
+            "/Users/graelo/ml/pytorch"
+        );
+    }
 }

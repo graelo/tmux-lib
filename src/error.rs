@@ -2,6 +2,7 @@ use std::{io, process::Output};
 
 /// Describes all errors variants from this crate.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// A tmux invocation returned some output where none was expected (actions such as
     /// some `tmux display-message` invocations).
@@ -19,11 +20,14 @@ pub enum Error {
     TmuxConfig(&'static str),
 
     /// Some parsing error.
-    #[error("failed parsing: `{intent}`")]
+    #[error("failed parsing {desc}: {message} (expected `{intent}`)")]
     ParseError {
+        /// What was being parsed.
         desc: &'static str,
+        /// The shape the parser expected, as a tmux format string.
         intent: &'static str,
-        err: nom::Err<nom::error::Error<String>>,
+        /// Why the parse failed.
+        message: String,
     },
 
     /// Failed parsing the output of a process invocation as utf-8.
@@ -57,11 +61,11 @@ pub fn map_add_intent(
     Error::ParseError {
         desc,
         intent,
-        err: nom_err.to_owned(),
+        message: nom_err.to_string(),
     }
 }
 
-/// Convert a byte-protocol parsing error into the public parse error type.
+/// Convert a wire-protocol parsing error into the public parse error type.
 pub(crate) fn map_byte_parse_error(
     desc: &'static str,
     intent: &'static str,
@@ -70,10 +74,7 @@ pub(crate) fn map_byte_parse_error(
     Error::ParseError {
         desc,
         intent,
-        err: nom::Err::Failure(nom::error::Error::new(
-            message.to_string(),
-            nom::error::ErrorKind::Verify,
-        )),
+        message: message.to_string(),
     }
 }
 

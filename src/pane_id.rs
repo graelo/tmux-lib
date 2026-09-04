@@ -104,7 +104,7 @@ mod tests {
             Err(Error::ParseError {
                 desc: "PaneId",
                 intent: "##{pane_id}",
-                err: _
+                message: _
             })
         ));
     }
