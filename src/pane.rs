@@ -13,13 +13,13 @@ use crate::{
     Result,
     error::{Error, check_empty_process_output, check_process_success, map_byte_parse_error},
     pane_id::PaneId,
-    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, normalize_tmux_output},
     window_id::WindowId,
+    wire::{
+        ByteParseError, RecordReader, decode_all, decode_one,
+        formats::{NEW_PANE_FORMAT, PANE_FIELDS, PANE_FORMAT, PANE_INTENT},
+        normalize_tmux_output,
+    },
 };
-
-/// Format used by [`available_panes`] for one pane per newline-terminated record.
-const PANE_LIST_FORMAT: &str = "#{pane_id}\x1f#{pane_index}\x1f#{?pane_active,true,false}\x1f#{n:pane_title}\x1f#{s|\\\\|\\\\\\\\|:pane_title}\x1f#{n:pane_current_command}\x1f#{s|\\\\|\\\\\\\\|:pane_current_command}\x1f#{n:pane_current_path}\x1f#{s|\\\\|\\\\\\\\|:pane_current_path}";
-const PANE_LIST_INTENT: &str = "#{pane_id}\\x1f#{pane_index}\\x1f#{?pane_active,true,false}\\x1f#{n:pane_title}\\x1f#{s|\\\\|\\\\\\\\|:pane_title}\\x1f#{n:pane_current_command}\\x1f#{s|\\\\|\\\\\\\\|:pane_current_command}\\x1f#{n:pane_current_path}\\x1f#{s|\\\\|\\\\\\\\|:pane_current_path}\\n";
 
 /// A Tmux pane.
 ///
@@ -79,8 +79,8 @@ impl FromStr for Pane {
     /// For definitions, look at `Pane` type and the tmux man page for
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
-        parse::framed_pane(input.as_bytes())
-            .map_err(|e| map_byte_parse_error("Pane", PANE_LIST_INTENT, e))
+        decode_one(input.as_bytes(), PANE_FIELDS, Pane::decode)
+            .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))
     }
 }
 
@@ -112,54 +112,22 @@ impl Pane {
     }
 }
 
-mod parse {
-    use super::*;
-
-    pub(super) fn framed_pane(input: &[u8]) -> std::result::Result<Pane, ByteParseError> {
-        let mut cursor = ByteCursor::new(input);
-        let pane = framed_pane_record(&mut cursor)?;
-        if !cursor.is_at_end() {
-            return Err(ByteParseError::new(
-                "unexpected trailing bytes after pane record",
-            ));
-        }
-        Ok(pane)
-    }
-
-    pub(super) fn framed_panes(input: &[u8]) -> crate::Result<Vec<Pane>> {
-        let mut cursor = ByteCursor::new(input);
-        let mut panes = Vec::new();
-        while !cursor.is_at_end() {
-            panes.push(
-                framed_pane_record(&mut cursor)
-                    .map_err(|e| map_byte_parse_error("Pane", PANE_LIST_INTENT, e))?,
-            );
-        }
-        Ok(panes)
-    }
-
-    fn framed_pane_record(
-        cursor: &mut ByteCursor<'_>,
-    ) -> std::result::Result<Pane, ByteParseError> {
-        let id = cursor
-            .take_token_str("pane ID")?
+impl Pane {
+    /// Build a `Pane` from one framed record, reading the fields declared in
+    /// [`PANE_FIELDS`].
+    fn decode(reader: &mut RecordReader<'_, '_>) -> std::result::Result<Pane, ByteParseError> {
+        let id = reader
+            .token("pane ID")?
             .parse()
             .map_err(|_| ByteParseError::new("invalid pane ID"))?;
-        let index = cursor
-            .take_token_str("pane index")?
+        let index = reader
+            .token("pane index")?
             .parse()
             .map_err(|_| ByteParseError::new("invalid pane index"))?;
-        let is_active = match cursor.take_token_str("pane active flag")? {
-            "true" => true,
-            "false" => false,
-            _ => return Err(ByteParseError::new("invalid pane active flag")),
-        };
-        let title = cursor.take_length_prefixed_string(FIELD_SEPARATOR, "pane title")?;
-        let command = cursor.take_length_prefixed_string(FIELD_SEPARATOR, "pane command")?;
-        if command.is_empty() {
-            return Err(ByteParseError::new("pane command is empty"));
-        }
-        let dirpath = cursor.take_length_prefixed_string(RECORD_SEPARATOR, "pane path")?;
+        let is_active = reader.flag("pane active flag")?;
+        let title = reader.data("pane title")?;
+        let command = reader.required_data("pane command")?;
+        let dirpath = reader.data("pane path")?;
 
         Ok(Pane {
             id,
@@ -178,13 +146,14 @@ mod parse {
 
 /// Return a list of all `Pane` from all sessions.
 pub async fn available_panes() -> Result<Vec<Pane>> {
-    let args = vec!["list-panes", "-a", "-F", PANE_LIST_FORMAT];
+    let args = vec!["list-panes", "-a", "-F", PANE_FORMAT.as_str()];
 
     let output = Command::new("tmux").args(&args).output().await?;
     check_process_success(&output, "list-panes")?;
     let stdout = normalize_tmux_output(&output.stdout)
-        .map_err(|e| map_byte_parse_error("Pane", PANE_LIST_INTENT, e))?;
-    parse::framed_panes(&stdout)
+        .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))?;
+    decode_all(&stdout, PANE_FIELDS, Pane::decode)
+        .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))
 }
 
 /// Create a new pane (horizontal split) in the window with `window_id`, and return the new
@@ -203,7 +172,7 @@ pub async fn new_pane(
         window_id.as_str(),
         "-P",
         "-F",
-        "#{pane_id}",
+        NEW_PANE_FORMAT,
     ];
     if let Some(pane_command) = pane_command {
         args.push(pane_command);
@@ -233,8 +202,14 @@ pub async fn select_pane(pane_id: &PaneId) -> Result<()> {
 mod tests {
     use super::Pane;
     use super::PaneId;
-    use super::parse;
-    use super::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+    use crate::wire::decode_all;
+    use crate::wire::formats::{PANE_FIELDS, PANE_INTENT};
+    use crate::wire::framing::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+
+    fn decode_all_test(input: &[u8]) -> crate::Result<Vec<Pane>> {
+        decode_all(input, PANE_FIELDS, Pane::decode)
+            .map_err(|e| crate::error::map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))
+    }
     use crate::Result;
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -497,7 +472,7 @@ mod tests {
             path.as_bytes(),
         );
 
-        let pane = parse::framed_panes(&record).unwrap().remove(0);
+        let pane = decode_all_test(&record).unwrap().remove(0);
 
         assert_eq!(pane.id.as_str(), "%274");
         assert_eq!(pane.index, 1);
@@ -535,19 +510,19 @@ mod tests {
         ];
 
         for record in malformed {
-            assert!(parse::framed_panes(&record).is_err());
+            assert!(decode_all_test(&record).is_err());
         }
 
         let invalid_utf8 = framed_pane_record(b"%1", b"0", b"false", &[0xff], b"zsh", b"/tmp");
-        assert!(parse::framed_panes(&invalid_utf8).is_err());
+        assert!(decode_all_test(&invalid_utf8).is_err());
 
         let undersized = b"%1\x1f0\x1ffalse\x1f4\x1ftitle\x1f3\x1fzsh\x1f4\x1f/tmp\n";
-        assert!(parse::framed_panes(undersized).is_err());
+        assert!(decode_all_test(undersized).is_err());
 
         let oversized = b"%1\x1f0\x1ffalse\x1f999\x1ftitle\x1f3\x1fzsh\x1f4\x1f/tmp\n";
-        assert!(parse::framed_panes(oversized).is_err());
+        assert!(decode_all_test(oversized).is_err());
 
         let overflowing = b"%1\x1f0\x1ffalse\x1f184467440737095516160\x1ftitle\n";
-        assert!(parse::framed_panes(overflowing).is_err());
+        assert!(decode_all_test(overflowing).is_err());
     }
 }

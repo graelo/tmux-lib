@@ -130,12 +130,15 @@ impl<'a> ByteCursor<'a> {
         self.position == self.input.len()
     }
 
-    /// Consume an ASCII structural token followed by the field separator.
-    pub(crate) fn take_token(&mut self) -> Result<&'a [u8], ByteParseError> {
+    /// Consume an ASCII structural token up to `terminator`.
+    ///
+    /// The terminator is the field separator for every field but the last of a
+    /// record, which is terminated by the record separator instead.
+    pub(crate) fn take_token(&mut self, terminator: u8) -> Result<&'a [u8], ByteParseError> {
         let start = self.position;
         let relative_end = self.input[start..]
             .iter()
-            .position(|&byte| byte == FIELD_SEPARATOR)
+            .position(|&byte| byte == terminator)
             .ok_or_else(|| {
                 ByteParseError::new(format!(
                     "missing field separator after structural token at byte {start}"
@@ -146,8 +149,12 @@ impl<'a> ByteCursor<'a> {
         Ok(&self.input[start..end])
     }
 
-    pub(crate) fn take_token_str(&mut self, field: &str) -> Result<&'a str, ByteParseError> {
-        let token = self.take_token()?;
+    pub(crate) fn take_token_str(
+        &mut self,
+        terminator: u8,
+        field: &str,
+    ) -> Result<&'a str, ByteParseError> {
+        let token = self.take_token(terminator)?;
         Self::utf8(token, field)
     }
 
@@ -156,7 +163,7 @@ impl<'a> ByteCursor<'a> {
         &mut self,
         terminator: u8,
     ) -> Result<&'a [u8], ByteParseError> {
-        let length_bytes = self.take_token()?;
+        let length_bytes = self.take_token(FIELD_SEPARATOR)?;
         let length_text = str::from_utf8(length_bytes).map_err(|_| {
             ByteParseError::new(format!(
                 "field length at byte {} is not ASCII",

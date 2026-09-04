@@ -14,15 +14,17 @@ use crate::{
     error::{Error, check_process_success, map_add_intent, map_byte_parse_error},
     pane::Pane,
     pane_id::{PaneId, parse::pane_id},
-    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, normalize_tmux_output},
     session_id::{SessionId, parse::session_id},
     window::Window,
     window_id::{WindowId, parse::window_id},
+    wire::{
+        ByteParseError, RecordReader, decode_all, decode_one,
+        formats::{
+            NEW_SESSION_FORMAT, NEW_SESSION_INTENT, SESSION_FIELDS, SESSION_FORMAT, SESSION_INTENT,
+        },
+        normalize_tmux_output,
+    },
 };
-
-/// Format used by [`available_sessions`] for one session per newline-terminated record.
-const SESSION_LIST_FORMAT: &str = "#{session_id}\x1f#{n:session_name}\x1f#{s|\\\\|\\\\\\\\|:session_name}\x1f#{n:session_path}\x1f#{s|\\\\|\\\\\\\\|:session_path}";
-const SESSION_LIST_INTENT: &str = "#{session_id}\\x1f#{n:session_name}\\x1f#{s|\\\\|\\\\\\\\|:session_name}\\x1f#{n:session_path}\\x1f#{s|\\\\|\\\\\\\\|:session_path}\\n";
 
 /// A Tmux session.
 ///
@@ -80,49 +82,21 @@ impl FromStr for Session {
     /// For definitions, look at `Session` type and the tmux man page for
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
-        parse::framed_session(input.as_bytes())
-            .map_err(|e| map_byte_parse_error("Session", SESSION_LIST_INTENT, e))
+        decode_one(input.as_bytes(), SESSION_FIELDS, Session::decode)
+            .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))
     }
 }
 
-mod parse {
-    use super::*;
-
-    pub(super) fn framed_session(input: &[u8]) -> std::result::Result<Session, ByteParseError> {
-        let mut cursor = ByteCursor::new(input);
-        let session = framed_session_record(&mut cursor)?;
-        if !cursor.is_at_end() {
-            return Err(ByteParseError::new(
-                "unexpected trailing bytes after session record",
-            ));
-        }
-        Ok(session)
-    }
-
-    pub(super) fn framed_sessions(input: &[u8]) -> Result<Vec<Session>> {
-        let mut cursor = ByteCursor::new(input);
-        let mut sessions = Vec::new();
-        while !cursor.is_at_end() {
-            sessions.push(
-                framed_session_record(&mut cursor)
-                    .map_err(|e| map_byte_parse_error("Session", SESSION_LIST_INTENT, e))?,
-            );
-        }
-        Ok(sessions)
-    }
-
-    fn framed_session_record(
-        cursor: &mut ByteCursor<'_>,
-    ) -> std::result::Result<Session, ByteParseError> {
-        let id = cursor
-            .take_token_str("session ID")?
+impl Session {
+    /// Build a `Session` from one framed record, reading the fields declared
+    /// in [`SESSION_FIELDS`].
+    fn decode(reader: &mut RecordReader<'_, '_>) -> std::result::Result<Session, ByteParseError> {
+        let id = reader
+            .token("session ID")?
             .parse()
             .map_err(|_| ByteParseError::new("invalid session ID"))?;
-        let name = cursor.take_length_prefixed_string(FIELD_SEPARATOR, "session name")?;
-        if name.is_empty() {
-            return Err(ByteParseError::new("session name is empty"));
-        }
-        let dirpath = cursor.take_length_prefixed_string(RECORD_SEPARATOR, "session path")?;
+        let name = reader.required_data("session name")?;
+        let dirpath = reader.data("session path")?;
 
         Ok(Session {
             id,
@@ -138,13 +112,14 @@ mod parse {
 
 /// Return a list of all `Session` from the current tmux session.
 pub async fn available_sessions() -> Result<Vec<Session>> {
-    let args = vec!["list-sessions", "-F", SESSION_LIST_FORMAT];
+    let args = vec!["list-sessions", "-F", SESSION_FORMAT.as_str()];
 
     let output = Command::new("tmux").args(&args).output().await?;
     check_process_success(&output, "list-sessions")?;
     let stdout = normalize_tmux_output(&output.stdout)
-        .map_err(|e| map_byte_parse_error("Session", SESSION_LIST_INTENT, e))?;
-    parse::framed_sessions(&stdout)
+        .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))?;
+    decode_all(&stdout, SESSION_FIELDS, Session::decode)
+        .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))
 }
 
 /// Create a Tmux session (and thus a window & pane).
@@ -171,7 +146,7 @@ pub async fn new_session(
         &window.name,
         "-P",
         "-F",
-        "#{session_id}:#{window_id}:#{pane_id}",
+        NEW_SESSION_FORMAT,
     ];
     if let Some(pane_command) = pane_command {
         args.push(pane_command);
@@ -187,7 +162,7 @@ pub async fn new_session(
     let buffer = buffer.trim_end();
 
     let desc = "new-session";
-    let intent = "##{session_id}:##{window_id}:##{pane_id}";
+    let intent = NEW_SESSION_INTENT;
     let (_, (new_session_id, _, new_window_id, _, new_pane_id)) =
         all_consuming((session_id, char(':'), window_id, char(':'), pane_id))
             .parse(buffer)
@@ -200,8 +175,14 @@ pub async fn new_session(
 mod tests {
     use super::Session;
     use super::SessionId;
-    use super::parse;
-    use super::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+    use crate::wire::decode_all;
+    use crate::wire::formats::{SESSION_FIELDS, SESSION_INTENT};
+    use crate::wire::framing::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+
+    fn decode_all_test(input: &[u8]) -> crate::Result<Vec<Session>> {
+        decode_all(input, SESSION_FIELDS, Session::decode)
+            .map_err(|e| crate::error::map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))
+    }
     use crate::Result;
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -398,10 +379,10 @@ mod tests {
         let invalid_utf8 = framed_session_record(b"$7", &[0xff], b"/tmp");
 
         for record in [missing_terminator, trailing_bytes, invalid_utf8] {
-            assert!(parse::framed_sessions(&record).is_err());
+            assert!(decode_all_test(&record).is_err());
         }
 
         let invalid_length = b"$7\x1fnot-a-number\x1fname\x1f4\x1f/tmp\n";
-        assert!(parse::framed_sessions(invalid_length).is_err());
+        assert!(decode_all_test(invalid_length).is_err());
     }
 }

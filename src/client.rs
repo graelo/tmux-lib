@@ -8,12 +8,12 @@ use smol::process::Command;
 use crate::{
     Result,
     error::{Error, check_process_success, map_byte_parse_error},
-    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, normalize_tmux_output},
+    wire::{
+        ByteParseError, RecordReader, decode_one,
+        formats::{CLIENT_FIELDS, CLIENT_FORMAT, CLIENT_INTENT},
+        normalize_tmux_output,
+    },
 };
-
-/// Format used by [`current`] for a newline-terminated client record.
-const CLIENT_FORMAT: &str = "#{n:client_session}\x1f#{s|\\\\|\\\\\\\\|:client_session}\x1f#{n:client_last_session}\x1f#{s|\\\\|\\\\\\\\|:client_last_session}";
-const CLIENT_INTENT: &str = "#{n:client_session}\\x1f#{s|\\\\|\\\\\\\\|:client_session}\\x1f#{n:client_last_session}\\x1f#{s|\\\\|\\\\\\\\|:client_last_session}\\n";
 
 /// A Tmux client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,31 +55,18 @@ impl FromStr for Client {
     /// For definitions, look at `Client` type and the tmux man page for
     /// definitions.
     fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
-        parse::framed_client(input.as_bytes())
-            .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT, e))
+        decode_one(input.as_bytes(), CLIENT_FIELDS, Client::decode)
+            .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))
     }
 }
 
-mod parse {
-    use super::*;
-
-    pub(super) fn framed_client(input: &[u8]) -> std::result::Result<Client, ByteParseError> {
-        let mut cursor = ByteCursor::new(input);
-        let session_name = cursor.take_length_prefixed_string(FIELD_SEPARATOR, "client session")?;
-        if session_name.is_empty() {
-            return Err(ByteParseError::new("client session is empty"));
-        }
-        let last_session_name =
-            cursor.take_length_prefixed_string(RECORD_SEPARATOR, "last client session")?;
-        if !cursor.is_at_end() {
-            return Err(ByteParseError::new(
-                "unexpected trailing bytes after client record",
-            ));
-        }
-
+impl Client {
+    /// Build a `Client` from one framed record, reading the fields declared in
+    /// [`CLIENT_FIELDS`].
+    fn decode(reader: &mut RecordReader<'_, '_>) -> std::result::Result<Client, ByteParseError> {
         Ok(Client {
-            session_name,
-            last_session_name,
+            session_name: reader.required_data("client session")?,
+            last_session_name: reader.data("last client session")?,
         })
     }
 }
@@ -94,13 +81,14 @@ mod parse {
 ///
 /// Returns an error if tmux fails or emits a malformed client record.
 pub async fn current() -> Result<Client> {
-    let args = vec!["display-message", "-p", "-F", CLIENT_FORMAT];
+    let args = vec!["display-message", "-p", "-F", CLIENT_FORMAT.as_str()];
 
     let output = Command::new("tmux").args(&args).output().await?;
     check_process_success(&output, "display-message")?;
     let stdout = normalize_tmux_output(&output.stdout)
-        .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT, e))?;
-    parse::framed_client(&stdout).map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT, e))
+        .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))?;
+    decode_one(&stdout, CLIENT_FIELDS, Client::decode)
+        .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))
 }
 
 /// Return a list of all `Pane` from all sessions.
@@ -138,8 +126,14 @@ pub async fn switch_client(session_name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::Client;
-    use super::parse;
-    use super::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+    use crate::wire::decode_one;
+    use crate::wire::formats::{CLIENT_FIELDS, CLIENT_INTENT};
+    use crate::wire::framing::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+
+    fn decode_one_test(input: &[u8]) -> crate::Result<Client> {
+        decode_one(input, CLIENT_FIELDS, Client::decode)
+            .map_err(|e| crate::error::map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))
+    }
     use std::str::FromStr;
 
     #[test]
@@ -244,10 +238,10 @@ mod tests {
         let invalid_length = b"7\x1fcurrent\x1fnot-a-number\x1flast\n";
         let empty_current = framed_client_record(b"", b"last");
 
-        assert!(parse::framed_client(&missing_terminator).is_err());
-        assert!(parse::framed_client(&trailing_bytes).is_err());
-        assert!(parse::framed_client(&invalid_utf8).is_err());
-        assert!(parse::framed_client(invalid_length).is_err());
-        assert!(parse::framed_client(&empty_current).is_err());
+        assert!(decode_one_test(&missing_terminator).is_err());
+        assert!(decode_one_test(&trailing_bytes).is_err());
+        assert!(decode_one_test(&invalid_utf8).is_err());
+        assert!(decode_one_test(invalid_length).is_err());
+        assert!(decode_one_test(&empty_current).is_err());
     }
 }

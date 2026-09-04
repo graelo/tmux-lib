@@ -7,6 +7,7 @@ use smol::{Timer, future, process::Command};
 use crate::{
     Result,
     error::{Error, check_empty_process_output},
+    wire::formats::SESSION_NAME_FORMAT,
 };
 
 /// Maximum time to wait for the server to become ready.
@@ -43,7 +44,7 @@ async fn wait_for_server_ready() -> Result<()> {
     let poll = async {
         loop {
             let output = Command::new("tmux")
-                .args(["list-sessions", "-F", "#{session_name}"])
+                .args(["list-sessions", "-F", SESSION_NAME_FORMAT])
                 .output()
                 .await?;
 
