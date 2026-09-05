@@ -14,6 +14,14 @@ pub(crate) const CLIENT_FIELDS: &[Field] = &[
     Field::Data("client_last_session"),
 ];
 
+/// Fields of a `list-clients` record.
+///
+/// `client_name` is a terminal path today, but it is user-visible state and is
+/// framed like any other, rather than joined with a separator this crate would
+/// then have to forbid.
+pub(crate) const CLIENT_LIST_FIELDS: &[Field] =
+    &[Field::Token("client_activity"), Field::Data("client_name")];
+
 /// Fields of a `list-panes` record.
 pub(crate) const PANE_FIELDS: &[Field] = &[
     Field::Token("pane_id"),
@@ -49,6 +57,7 @@ macro_rules! derived_format {
 }
 
 derived_format!(CLIENT_FORMAT, CLIENT_INTENT, CLIENT_FIELDS);
+derived_format!(CLIENT_LIST_FORMAT, CLIENT_LIST_INTENT, CLIENT_LIST_FIELDS);
 derived_format!(PANE_FORMAT, PANE_INTENT, PANE_FIELDS);
 derived_format!(WINDOW_FORMAT, WINDOW_INTENT, WINDOW_FIELDS);
 derived_format!(SESSION_FORMAT, SESSION_INTENT, SESSION_FIELDS);
