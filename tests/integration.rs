@@ -209,6 +209,48 @@ mod server_tests {
 // Sessions
 // ============================================================================
 
+mod client_tests {
+    use super::*;
+
+    #[test]
+    fn most_recent_client_name_is_none_without_an_attached_client() {
+        require_tmux!();
+        let server = TestServer::start("clients");
+
+        // The private server holds a detached session and nothing else. The
+        // value is not the point — this asserts tmux accepts the framed
+        // `list-clients` format and that an empty reply decodes as no client
+        // rather than as an error.
+        let name = server.tmux().most_recent_client_name().unwrap();
+
+        assert_eq!(name, None);
+    }
+
+    #[test]
+    fn current_client_name_fails_outside_a_client() {
+        require_tmux!();
+        let server = TestServer::start("noclient");
+
+        assert!(server.tmux().current_client_name().is_err());
+    }
+
+    #[test]
+    fn display_message_to_is_best_effort() {
+        require_tmux!();
+        let server = TestServer::start("msgtarget");
+
+        // tmux reports no error for a client name that does not exist — it
+        // shows the message on whatever client it can find instead. Callers
+        // reporting to a client they picked earlier cannot rely on an error
+        // to tell them the client went away, so this pins the behaviour they
+        // do get.
+        server
+            .tmux()
+            .display_message_to("/dev/null-no-such-client", "hello")
+            .expect("an unknown client target is not an error");
+    }
+}
+
 mod session_tests {
     use super::*;
 

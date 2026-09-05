@@ -3,14 +3,37 @@
 use crate::{
     Result,
     client::Client,
-    error::{check_empty_process_output, check_process_success, map_byte_parse_error},
+    error::{Error, check_empty_process_output, check_process_success, map_byte_parse_error},
     tmux::Tmux,
     wire::{
-        decode_one,
-        formats::{CLIENT_FIELDS, CLIENT_FORMAT, CLIENT_INTENT},
+        ByteParseError, RecordReader, decode_all, decode_one,
+        formats::{
+            CLIENT_FIELDS, CLIENT_FORMAT, CLIENT_INTENT, CLIENT_LIST_FIELDS, CLIENT_LIST_FORMAT,
+            CLIENT_LIST_INTENT,
+        },
         normalize_tmux_output,
     },
 };
+
+/// One `list-clients` row: a client's name, and when it was last active.
+struct ClientActivity {
+    activity: u64,
+    name: String,
+}
+
+impl ClientActivity {
+    fn decode(
+        reader: &mut RecordReader<'_, '_>,
+    ) -> std::result::Result<ClientActivity, ByteParseError> {
+        let activity = reader
+            .token("client activity")?
+            .parse()
+            .map_err(|_| ByteParseError::new("invalid client activity"))?;
+        let name = reader.required_data("client name")?;
+
+        Ok(ClientActivity { activity, name })
+    }
+}
 
 impl Tmux {
     /// Return the attributes of the client issuing this command.
@@ -47,9 +70,70 @@ impl Tmux {
             .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))
     }
 
+    /// Return the name of the client issuing this command, such as
+    /// `/dev/ttys002`.
+    ///
+    /// This is the target other clients are addressed by; see
+    /// [`Self::client_for_target`] and [`Self::display_message_to`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if tmux fails, or if it names no client — which is
+    /// what happens outside a tmux client, where there is nothing to name.
+    pub fn current_client_name(&self) -> Result<String> {
+        let output = self.output(&["display-message", "-p", "-F", "#{client_name}"])?;
+        check_process_success(&output, "display-message")?;
+
+        let name = String::from_utf8(output.stdout)?.trim_end().to_string();
+        if name.is_empty() {
+            return Err(Error::TmuxConfig("tmux named no current client"));
+        }
+
+        Ok(name)
+    }
+
+    /// Return the name of the attached client that was active most recently,
+    /// or `None` when no client is attached.
+    ///
+    /// This is how a process running outside tmux — a scheduler, a hook —
+    /// picks a client to report to.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if tmux fails or emits a malformed client record.
+    pub fn most_recent_client_name(&self) -> Result<Option<String>> {
+        let output = self.output(&["list-clients", "-F", CLIENT_LIST_FORMAT.as_str()])?;
+        check_process_success(&output, "list-clients")?;
+
+        let stdout = normalize_tmux_output(&output.stdout)
+            .map_err(|e| map_byte_parse_error("Client", CLIENT_LIST_INTENT.as_str(), e))?;
+        let clients = decode_all(&stdout, CLIENT_LIST_FIELDS, ClientActivity::decode)
+            .map_err(|e| map_byte_parse_error("Client", CLIENT_LIST_INTENT.as_str(), e))?;
+
+        Ok(most_recent(clients))
+    }
+
     /// Display `message` in the status line of the current client.
     pub fn display_message(&self, message: &str) -> Result<()> {
         let output = self.output(&["display-message", message])?;
+        check_empty_process_output(&output, "display-message")
+    }
+
+    /// Display `message` in the status line of the client named `target`.
+    ///
+    /// Use this when the caller is not itself a tmux client and has picked one
+    /// with [`Self::most_recent_client_name`].
+    ///
+    /// The client is selected with `-c`, not `-t`. `-t` is a target *pane*; it
+    /// accepts a client name and resolves formats against that client, which
+    /// is why [`Self::client_for_target`] uses it, but it does not choose
+    /// where a message is shown. With two clients attached, `-t <client>`
+    /// delivers the message to the other one.
+    ///
+    /// Delivery is best effort: tmux reports no error for a client name that
+    /// does not exist, it just shows the message somewhere else.
+    pub fn display_message_to(&self, target: &str, message: &str) -> Result<()> {
+        let output = self.output(&["display-message", "-c", target, message])?;
         check_empty_process_output(&output, "display-message")
     }
 
@@ -67,5 +151,73 @@ impl Tmux {
 
         let output = self.output(&["switch-client", "-t", &exact_session_name])?;
         check_empty_process_output(&output, "switch-client")
+    }
+}
+
+/// Pick the name of the client that was active most recently.
+fn most_recent(clients: Vec<ClientActivity>) -> Option<String> {
+    clients
+        .into_iter()
+        .max_by_key(|client| client.activity)
+        .map(|client| client.name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClientActivity, most_recent};
+    use crate::wire::{decode_all, formats::CLIENT_LIST_FIELDS};
+
+    /// Frame a `list-clients` reply the way tmux would.
+    fn framed(rows: &[(&str, &str)]) -> Vec<u8> {
+        let mut record = Vec::new();
+        for (activity, name) in rows {
+            record.extend_from_slice(activity.as_bytes());
+            record.push(0x1f);
+            record.extend_from_slice(name.len().to_string().as_bytes());
+            record.push(0x1f);
+            record.extend_from_slice(name.as_bytes());
+            record.push(b'\n');
+        }
+        record
+    }
+
+    fn decode(rows: &[(&str, &str)]) -> Vec<ClientActivity> {
+        decode_all(&framed(rows), CLIENT_LIST_FIELDS, ClientActivity::decode).unwrap()
+    }
+
+    #[test]
+    fn selects_the_most_recently_active_client() {
+        let clients = decode(&[
+            ("10", "/dev/ttys001"),
+            ("22", "/dev/ttys002"),
+            ("15", "/dev/ttys003"),
+        ]);
+
+        assert_eq!(most_recent(clients).as_deref(), Some("/dev/ttys002"));
+    }
+
+    #[test]
+    fn no_client_is_none() {
+        assert_eq!(most_recent(decode(&[])), None);
+    }
+
+    #[test]
+    fn a_non_numeric_activity_is_a_parse_error() {
+        // The old hand-rolled reader skipped rows it could not parse, which
+        // would silently report the wrong client. A malformed record is a
+        // failure now.
+        let record = framed(&[("not-a-number", "/dev/ttys001")]);
+
+        assert!(decode_all(&record, CLIENT_LIST_FIELDS, ClientActivity::decode).is_err());
+    }
+
+    #[test]
+    fn a_client_name_may_contain_a_separator() {
+        let clients = decode(&[("5", "/dev/pts/1\tweird\nname")]);
+
+        assert_eq!(
+            most_recent(clients).as_deref(),
+            Some("/dev/pts/1\tweird\nname")
+        );
     }
 }

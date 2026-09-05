@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- `Tmux::current_client_name`, `Tmux::most_recent_client_name` and
+  `Tmux::display_message_to`, so a caller outside tmux can pick an attached
+  client and report to it without spawning tmux itself
+
 ### Fixed
 
 - `show_option` queries the same scope as `show_options` — the global table
