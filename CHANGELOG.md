@@ -8,6 +8,18 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- `show_option` queries the same scope as `show_options` — the global table
+  with `global`, the session table without it. It passed `-w` unconditionally,
+  so it asked for window options while `show_options` asked for session ones
+
+### Changed
+
+- No `make` target passes `--locked`. This crate is a library, its
+  `Cargo.lock` is gitignored, and the versions that matter are the ones a
+  consumer's own lock file picks
+
 ## [0.6.0] - 2026-09-05
 
 ### Changed
