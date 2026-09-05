@@ -36,13 +36,22 @@ impl ClientActivity {
 }
 
 impl Tmux {
-    /// Return the attributes of the client issuing this command.
+    /// Return the attributes of the client issuing this command, or `None`
+    /// when the caller is not running inside one.
+    ///
+    /// Outside a client — a scheduler, a cron job, a plain shell — tmux has
+    /// nothing to resolve `#{client_session}` against and answers with an
+    /// empty session. That is a state to report, not a failure: see
+    /// [`Self::most_recent_client_name`] for picking a client in that case.
     ///
     /// # Errors
     ///
     /// Returns an error if tmux fails or emits a malformed client record.
-    pub fn current_client(&self) -> Result<Client> {
-        self.client_record(&["display-message", "-p", "-F", CLIENT_FORMAT.as_str()])
+    pub fn current_client(&self) -> Result<Option<Client>> {
+        let client =
+            self.client_record(&["display-message", "-p", "-F", CLIENT_FORMAT.as_str()])?;
+
+        Ok((!client.session_name.is_empty()).then_some(client))
     }
 
     /// Return the attributes of the client attached to `target`.

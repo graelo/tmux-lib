@@ -227,6 +227,18 @@ mod client_tests {
     }
 
     #[test]
+    fn current_client_is_none_outside_a_client() {
+        require_tmux!();
+        let server = TestServer::start("curclient");
+
+        // The test process is not a tmux client of this private server, so
+        // tmux has no client to resolve the format against.
+        let client = server.tmux().current_client().unwrap();
+
+        assert!(client.is_none());
+    }
+
+    #[test]
     fn current_client_name_fails_outside_a_client() {
         require_tmux!();
         let server = TestServer::start("noclient");
