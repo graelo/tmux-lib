@@ -8,30 +8,66 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-05
+
+### Changed
+
+- **Breaking:** every tmux operation is now a synchronous method on a `Tmux`
+  handle (`Tmux::spawning()`, or `Tmux::spawning_on(Server::socket_name(..))`
+  for a non-default server) instead of an `async` free function. The handle is
+  `Send + Sync + Clone`; async callers bridge with their runtime's blocking
+  helper. The `smol` dependency is gone, taking the transitive runtime
+  dependencies from 42 crates to 12
+- **Breaking:** remove legacy quote-delimited `FromStr` input for panes,
+  sessions, windows, and clients; framed records are decoded by the crate
+  itself and are no longer part of the public API. `Tmux::current_client` and
+  `Tmux::client_for_target` replace hand-built format strings fed to
+  `Client::from_str`
+- **Breaking:** `display_message` and `switch_client` return `Result` instead
+  of panicking on failure, and the `display_message` re-export at the crate
+  root is now `Tmux::display_message`
+- **Breaking:** `Error` is `#[non_exhaustive]`, and `Error::ParseError`
+  carries a plain message rather than a `nom` error, which the record decoders
+  no longer produce
+- `Pane::capture` becomes `Tmux::capture_pane`, and `Pane`, `Window`,
+  `Session` and `Client` no longer perform I/O
+- Make `README.md` the canonical crate overview and remove its
+  `cargo-sync-readme` markers, and document the API there
+- Reduce crate-level Rust documentation to a link to the project README
+
+### Fixed
+
+- Pass `-u` to every tmux invocation. Without it, a tmux client started in an
+  environment with no locale is treated as non-UTF-8, and tmux replaces every
+  non-ASCII byte in its output with `_` — silently mangling pane titles and
+  paths under cron, launchd, or a bare systemd unit
+- `show_option` returned `"status off"` where it meant `"off"`; it asked tmux
+  to print the option name alongside the value
+- Use byte-length-prefixed tmux records when reading panes, sessions, windows,
+  and client session names, preserving arbitrary UTF-8 values and newlines
+- Normalize visually escaped tmux 3.4–3.5 command output before parsing framed
+  records, preserving arbitrary UTF-8 values and backslashes across tmux
+  versions
+
 ### Added
 
+- `Server`, selecting the default tmux server, a socket name (`tmux -L`) or a
+  socket path (`tmux -S`). Integration tests now run each case on their own
+  private server instead of sharing the developer's
+- `src/wire/`, the single module that knows the framed record protocol. Format
+  and intent strings are derived from a declared field list per record type
+  rather than hand-escaped in four places
+- `src/transport/`, the single site that starts a tmux process, so every
+  invocation shares one argument prefix
+- `tests/architecture.rs` enforces both of the above by walking `src/`
+- A tmux version axis (3.2, 3.4, 3.5, 3.6, 3.7c, built from source) in the
+  compatibility matrix, with `ci/tmux_wire_probe.sh` checking that the buffer
+  round-trip preserves bytes on each
 - A `Makefile` defines canonical local verification tasks, with `make check`
   as the pre-push gate and `make check-all` as the pre-PR gate
 - `rumdl.toml` applies consistent Markdown linting and formatting rules
 - `AGENTS.md` documents the project architecture, verification, and release
   conventions for coding agents
-
-### Fixed
-
-- Use byte-length-prefixed tmux records when reading panes, sessions, windows,
-  and client session names, preserving arbitrary UTF-8 values and newlines
-- Normalize visually escaped tmux 3.2–3.5 command output before parsing framed
-  records, preserving arbitrary UTF-8 values and backslashes across tmux
-  versions
-
-### Changed
-
-- **Breaking:** remove legacy quote-delimited `FromStr` input for panes,
-  sessions, windows, and clients; these parsers now accept only byte-length-
-  prefixed framed tmux records
-- Make `README.md` the canonical crate overview and remove its
-  `cargo-sync-readme` markers
-- Reduce crate-level Rust documentation to a link to the project README
 
 ## [0.5.0] - 2026-04-18
 
