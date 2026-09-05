@@ -14,6 +14,15 @@ and this project adheres to
   `Tmux::display_message_to`, so a caller outside tmux can pick an attached
   client and report to it without spawning tmux itself
 
+### Changed
+
+- **Breaking:** `Tmux::current_client` returns `Option<Client>`. Outside a
+  tmux client — a scheduler, a cron job, a plain shell — tmux answers
+  `display-message` with an empty session, and the framed decoder rejected it
+  as malformed. A caller running outside tmux could no longer describe the
+  client, which is a state to report rather than a failure
+- `Client` derives `Default`, so "no client" has a value to record
+
 ### Fixed
 
 - `show_option` queries the same scope as `show_options` — the global table
