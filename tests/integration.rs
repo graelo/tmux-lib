@@ -166,6 +166,25 @@ mod server_tests {
     }
 
     #[test]
+    fn show_option_reaches_the_window_option_table() {
+        require_tmux!();
+        let server = TestServer::start("optwin");
+        let tmux = server.tmux();
+
+        // `automatic-rename` lives in the window table, not the session one.
+        // The query passes no `-w`, so this asserts tmux resolves the name
+        // against the table that declares it.
+        server.raw(&["set-option", "-g", "-w", "automatic-rename", "off"]);
+
+        assert_eq!(
+            tmux.show_option("automatic-rename", true)
+                .unwrap()
+                .as_deref(),
+            Some("off")
+        );
+    }
+
+    #[test]
     fn show_option_returns_none_for_an_unset_option() {
         require_tmux!();
         let server = TestServer::start("optnone");

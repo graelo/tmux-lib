@@ -63,10 +63,15 @@ impl Tmux {
 
     /// Return the value of one tmux option, or `None` when it is unset.
     ///
+    /// `global` selects the same scope as [`Self::show_options`]: the global
+    /// table with it, the session table without it. tmux resolves the option
+    /// name against the table that declares it, so window options such as
+    /// `automatic-rename` are reachable either way.
+    ///
     /// `-v` asks for the value alone; without it tmux prints `name value`.
     /// `-q` turns an unknown option into empty output rather than an error.
     pub fn show_option(&self, option_name: &str, global: bool) -> Result<Option<String>> {
-        let mut args = vec!["show-options", "-w", "-q", "-v"];
+        let mut args = vec!["show-options", "-q", "-v"];
         if global {
             args.push("-g");
         }
