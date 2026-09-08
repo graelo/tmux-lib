@@ -9,6 +9,10 @@ Read or manipulate tmux.
 
 Version requirements: _rustc 1.95.0+_ and _tmux 3.2+_
 
+One operation asks for more: `Tmux::display_message_to` needs _tmux 3.3+_,
+because 3.2 declares `display-message -c` as taking no argument and answers
+any use of it with its usage string.
+
 ```toml
 [dependencies]
 tmux-lib = "0.6"

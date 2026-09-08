@@ -27,6 +27,26 @@ fn tmux_available() -> bool {
     Command::new("tmux").arg("-V").output().is_ok()
 }
 
+/// The installed tmux version as `(major, minor)`, for tests that pin a
+/// behaviour tmux only grew at some point.
+///
+/// `tmux -V` prints `tmux 3.3a` or `tmux next-3.6`; the trailing letter is a
+/// patch level and the `next-` prefix a pre-release, so neither participates
+/// in the comparison.
+fn tmux_version() -> Option<(u32, u32)> {
+    let output = Command::new("tmux").arg("-V").output().ok()?;
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let version = stdout.split_whitespace().nth(1)?.rsplit('-').next()?;
+
+    let mut parts = version.split('.');
+    let number = |part: Option<&str>| -> Option<u32> {
+        let digits: String = part?.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse().ok()
+    };
+
+    Some((number(parts.next())?, number(parts.next())?))
+}
+
 /// A private tmux server, killed when the test ends.
 struct TestServer {
     socket: String,
@@ -112,6 +132,26 @@ macro_rules! require_tmux {
         if !tmux_available() {
             eprintln!("Skipping test: tmux not available");
             return;
+        }
+    };
+}
+
+/// Skip the body when the installed tmux is older than `major.minor`.
+macro_rules! require_tmux_version {
+    ($major:expr, $minor:expr) => {
+        match tmux_version() {
+            Some(version) if version >= ($major, $minor) => {}
+            Some((major, minor)) => {
+                eprintln!(
+                    "Skipping test: needs tmux {}.{}, found {major}.{minor}",
+                    $major, $minor
+                );
+                return;
+            }
+            None => {
+                eprintln!("Skipping test: cannot read the tmux version");
+                return;
+            }
         }
     };
 }
@@ -249,6 +289,9 @@ mod client_tests {
     #[test]
     fn display_message_to_is_best_effort() {
         require_tmux!();
+        // tmux 3.2 declares `-c` without an argument, so every call is a usage
+        // error there — see `Tmux::display_message_to`.
+        require_tmux_version!(3, 3);
         let server = TestServer::start("msgtarget");
 
         // tmux reports no error for a client name that does not exist — it

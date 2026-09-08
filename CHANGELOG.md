@@ -22,6 +22,9 @@ and this project adheres to
   as malformed. A caller running outside tmux could no longer describe the
   client, which is a state to report rather than a failure
 - `Client` derives `Default`, so "no client" has a value to record
+- No `make` target passes `--locked`. This crate is a library, its
+  `Cargo.lock` is gitignored, and the versions that matter are the ones a
+  consumer's own lock file picks
 
 ### Fixed
 
@@ -29,11 +32,13 @@ and this project adheres to
   with `global`, the session table without it. It passed `-w` unconditionally,
   so it asked for window options while `show_options` asked for session ones
 
-### Changed
+### Documentation
 
-- No `make` target passes `--locked`. This crate is a library, its
-  `Cargo.lock` is gitignored, and the versions that matter are the ones a
-  consumer's own lock file picks
+- `Tmux::display_message_to` requires tmux 3.3. The compatibility matrix
+  showed 3.2 rejecting every call: it declares `display-message -c` without an
+  argument, so the client name is parsed as a second positional argument and
+  tmux answers with its usage string. Nothing on 3.2 targets a client, so this
+  is documented rather than worked around
 
 ## [0.6.0] - 2026-09-05
 

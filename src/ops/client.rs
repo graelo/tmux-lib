@@ -141,6 +141,15 @@ impl Tmux {
     ///
     /// Delivery is best effort: tmux reports no error for a client name that
     /// does not exist, it just shows the message somewhere else.
+    ///
+    /// # Compatibility
+    ///
+    /// Requires tmux 3.3 or later. tmux 3.2 declares `-c` as taking no
+    /// argument — `.args = { "acd:INpt:F:v", 0, 1 }`, missing the colon that
+    /// 3.3 added — so the client name is parsed as a second positional
+    /// argument and tmux answers with its usage string. Nothing else on 3.2
+    /// targets a client either: `-t` names a pane, and the message still goes
+    /// to the current client. [`Self::display_message`] is unaffected.
     pub fn display_message_to(&self, target: &str, message: &str) -> Result<()> {
         let output = self.output(&["display-message", "-c", target, message])?;
         check_empty_process_output(&output, "display-message")
