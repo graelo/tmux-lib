@@ -10,8 +10,13 @@
 # as a length-framed transport for pane contents — which is what a future
 # control-mode transport wants it for.
 #
-# The check: load known bytes into a buffer, read them back, and require the
-# bytes and the advertised `#{buffer_size}` to both match the input exactly.
+# Two checks, both fatal: load known bytes into a buffer and require the
+# readback and the advertised `#{buffer_size}` to match the input exactly, then
+# read one pane both ways and require the two routes to agree.
+#
+# Every released tmux answers this identically forever, so the rows in the
+# matrix are settled; the point is that a version added later answers it
+# without anyone having to remember the question exists.
 
 set -euo pipefail
 
@@ -22,7 +27,11 @@ fi
 
 socket="wire-probe-$$"
 work=$(mktemp -d)
-trap 'tmux -L "$socket" kill-server 2>/dev/null || true; rm -rf "$work"' EXIT
+# `kill-server` leaves the socket file behind, so remove it too — this script
+# is meant to be runnable on a developer's machine, not only on a runner that
+# is thrown away afterwards.
+socket_dir="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"
+trap 'tmux -L "$socket" kill-server 2>/dev/null || true; rm -f "$socket_dir/$socket"; rm -rf "$work"' EXIT
 
 # Bytes chosen for what an escaping sink would visibly change: multi-byte
 # UTF-8, a literal backslash (VIS_NOSLASH leaves it alone, so a doubled one
@@ -61,26 +70,56 @@ else
   status=1
 fi
 
-# Informational: the two ways to read a pane should agree. If they diverge on
-# some version, the buffer route is the one worth keeping.
+# The two ways to read a pane must agree. `capture-pane -p` writes through the
+# command-output sink — the one that vis-escapes on 3.4 and 3.5 — while
+# `capture-pane -b` plus `show-buffer` goes by way of a buffer. A divergence is
+# what would keep pane capture on the spawning transport.
+
+# Wait up to ten seconds for a condition rather than guessing a sleep, and fail
+# the probe when it never holds: a pane that never echoed yields two empty
+# captures, which compare equal and would report agreement without having
+# compared anything.
+wait_for() {
+  local description=$1
+  shift
+  local deadline=$((SECONDS + 10))
+
+  until "$@"; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "FAIL  timed out waiting for $description"
+      exit 1
+    fi
+    sleep 0.2
+  done
+}
+
+pane_runs_cat() {
+  [ "$(tmux -u -L "$socket" display-message -p -t compare '#{pane_current_command}')" = cat ]
+}
+
+pane_echoed() {
+  tmux -u -L "$socket" capture-pane -p -t compare | grep -q backslash
+}
+
 tmux -u -L "$socket" set-option -g default-command "cat" >/dev/null
 tmux -u -L "$socket" new-window -d -n compare
-sleep 0.5
+
+# Keys sent before `cat` owns the tty are dropped, so wait for the pane to be
+# running it before typing into it.
+wait_for "the comparison pane to start cat" pane_runs_cat
 tmux -u -L "$socket" send-keys -t compare 'π café \ backslash' Enter
-sleep 0.5
+wait_for "the comparison pane to echo the line" pane_echoed
+
 tmux -u -L "$socket" capture-pane -p -t compare >"$work/direct"
 tmux -u -L "$socket" capture-pane -b compare -t compare
 tmux -u -L "$socket" show-buffer -b compare >"$work/buffered"
 
-if ! grep -q backslash "$work/direct"; then
-  # Two empty captures compare equal, which would report agreement without
-  # having compared anything. Say so instead.
-  echo "INFO  the comparison pane never echoed; capture routes not compared"
-elif cmp -s "$work/direct" "$work/buffered"; then
-  echo "INFO  capture-pane -p and capture-pane -b agree byte for byte"
+if cmp -s "$work/direct" "$work/buffered"; then
+  echo "PASS  capture-pane -p and capture-pane -b agree byte for byte"
 else
-  echo "INFO  capture-pane -p and capture-pane -b DIVERGE on this version"
+  echo "FAIL  capture-pane -p and capture-pane -b diverge on this version"
   diff <(od -c "$work/direct") <(od -c "$work/buffered") || true
+  status=1
 fi
 
 exit $status
