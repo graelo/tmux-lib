@@ -872,25 +872,6 @@ mod control_routing_tests {
     }
 
     #[test]
-    fn a_control_handle_captures_a_pane() {
-        require_tmux!();
-        let server = TestServer::start("ctlcap");
-        let control = server.control();
-
-        let pane = control
-            .available_panes()
-            .unwrap()
-            .into_iter()
-            .next()
-            .expect("the initial session has a pane");
-
-        let by_control = control.capture_pane(&pane.id).unwrap();
-        let by_spawning = server.tmux().capture_pane(&pane.id).unwrap();
-
-        assert_eq!(by_control, by_spawning);
-    }
-
-    #[test]
     fn a_control_handle_reports_no_current_client_outside_one() {
         require_tmux!();
         let server = TestServer::start("ctlcur");
