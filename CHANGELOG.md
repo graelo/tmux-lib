@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** remove `error::check_process_success` and
+  `error::check_empty_process_output`. Both took a `std::process::Output`,
+  which no caller outside the crate can obtain from this API, and the control
+  transport has no process to hand them — it has a block of output and an
+  `%end`/`%error` terminator. Their checks are now methods on an internal
+  reply type that both transports produce
+
+### Fixed
+
+- `Tmux::command` reports a failing tmux command instead of handing back
+  whatever it left on stdout
+- `show_option` and `show_options` report a failing tmux command instead of
+  answering `None` and an empty map
+- An operation expected to be silent, such as `select_pane`, now also reports
+  a command that exited non-zero without printing anything. The check it
+  replaced looked only at the two output streams
+
 ## [0.6.0] - 2026-09-11
 
 ### Changed
