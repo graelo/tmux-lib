@@ -1,6 +1,9 @@
 //! The handle every tmux operation hangs off.
 
-use crate::{Result, transport::Spawning};
+use crate::{
+    Result,
+    transport::{Reply, Spawning},
+};
 
 /// Which tmux server to talk to.
 ///
@@ -89,13 +92,12 @@ impl Tmux {
     /// trailing newline is reported — so do not depend on byte-identical
     /// output across transports.
     pub fn command(&self, argv: &[&str]) -> Result<Vec<u8>> {
-        let output = self.transport.output(argv)?;
-        Ok(output.stdout)
+        self.run(argv)?.output("command")
     }
 
-    /// Run one tmux command, for operations that inspect the whole `Output`.
-    pub(crate) fn output(&self, argv: &[&str]) -> Result<std::process::Output> {
-        self.transport.output(argv)
+    /// Run one tmux command and return what the transport made of it.
+    pub(crate) fn run(&self, argv: &[&str]) -> Result<Reply> {
+        self.transport.run(argv)
     }
 }
 

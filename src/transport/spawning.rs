@@ -1,14 +1,14 @@
 //! Running tmux by forking a client process per command.
 //!
 //! This is the only place in the crate that starts a tmux process. Every
-//! argument every operation sends passes through [`Spawning::output`], so
+//! argument every operation sends passes through [`Spawning::run`], so
 //! anything that must be true of all invocations — the server address, and
 //! later the UTF-8 flag — is stated here once and cannot be forgotten at a
 //! call site.
 
-use std::process::{Command, Output};
+use std::process::Command;
 
-use crate::{Result, tmux::Server};
+use crate::{Result, tmux::Server, transport::Reply};
 
 /// Forks one `tmux` client per command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,8 +59,9 @@ impl Spawning {
         full
     }
 
-    pub(crate) fn output(&self, argv: &[&str]) -> Result<Output> {
-        Ok(Command::new("tmux").args(self.argv(argv)).output()?)
+    /// Run one command, forking a client for it.
+    pub(crate) fn run(&self, argv: &[&str]) -> Result<Reply> {
+        Ok(Command::new("tmux").args(self.argv(argv)).output()?.into())
     }
 }
 

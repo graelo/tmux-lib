@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::{
     Result,
-    error::{check_empty_process_output, check_process_success, map_byte_parse_error},
+    error::map_byte_parse_error,
     pane::Pane,
     pane_id::PaneId,
     tmux::Tmux,
@@ -19,9 +19,10 @@ use crate::{
 impl Tmux {
     /// Return every `Pane` from every session.
     pub fn available_panes(&self) -> Result<Vec<Pane>> {
-        let output = self.output(&["list-panes", "-a", "-F", PANE_FORMAT.as_str()])?;
-        check_process_success(&output, "list-panes")?;
-        let stdout = normalize_tmux_output(&output.stdout)
+        let output = self
+            .run(&["list-panes", "-a", "-F", PANE_FORMAT.as_str()])?
+            .output("list-panes")?;
+        let stdout = normalize_tmux_output(&output)
             .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))?;
         decode_all(&stdout, PANE_FIELDS, Pane::decode)
             .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))
@@ -35,7 +36,7 @@ impl Tmux {
     /// because tmux cannot both preserve escape codes and trim lines. Pass the
     /// result through [`crate::utils::cleanup_captured_buffer`].
     pub fn capture_pane(&self, pane_id: &PaneId) -> Result<Vec<u8>> {
-        let output = self.output(&[
+        self.run(&[
             "capture-pane",
             "-t",
             pane_id.as_str(),
@@ -46,9 +47,8 @@ impl Tmux {
             "-",  // start of history
             "-E", // ending line number
             "-",  // end of history
-        ])?;
-
-        Ok(output.stdout)
+        ])?
+        .output("capture-pane")
     }
 
     /// Create a pane by splitting the window with `window_id` horizontally,
@@ -81,20 +81,18 @@ impl Tmux {
             args.push(pane_command);
         }
 
-        let output = self.output(&args)?;
+        // The reply is checked before parsing, so that a failing tmux does
+        // not surface as a confusing parse error over whatever it printed.
+        let output = self.run(&args)?.output("split-window")?;
 
-        // Check exit status before parsing to avoid confusing parse errors
-        // when tmux fails and returns empty/garbage stdout.
-        check_process_success(&output, "split-window")?;
-
-        let buffer = String::from_utf8(output.stdout)?;
+        let buffer = String::from_utf8(output)?;
 
         PaneId::from_str(buffer.trim_end())
     }
 
     /// Select (make active) the pane with `pane_id`.
     pub fn select_pane(&self, pane_id: &PaneId) -> Result<()> {
-        let output = self.output(&["select-pane", "-t", pane_id.as_str()])?;
-        check_empty_process_output(&output, "select-pane")
+        self.run(&["select-pane", "-t", pane_id.as_str()])?
+            .no_output("select-pane")
     }
 }

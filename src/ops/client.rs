@@ -3,7 +3,7 @@
 use crate::{
     Result,
     client::Client,
-    error::{Error, check_empty_process_output, check_process_success, map_byte_parse_error},
+    error::{Error, map_byte_parse_error},
     tmux::Tmux,
     wire::{
         ByteParseError, RecordReader, decode_all, decode_one,
@@ -71,9 +71,8 @@ impl Tmux {
     }
 
     fn client_record(&self, argv: &[&str]) -> Result<Client> {
-        let output = self.output(argv)?;
-        check_process_success(&output, "display-message")?;
-        let stdout = normalize_tmux_output(&output.stdout)
+        let output = self.run(argv)?.output("display-message")?;
+        let stdout = normalize_tmux_output(&output)
             .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))?;
         decode_one(&stdout, CLIENT_FIELDS, Client::decode)
             .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))
@@ -90,10 +89,11 @@ impl Tmux {
     /// Returns an error if tmux fails, or if it names no client — which is
     /// what happens outside a tmux client, where there is nothing to name.
     pub fn current_client_name(&self) -> Result<String> {
-        let output = self.output(&["display-message", "-p", "-F", "#{client_name}"])?;
-        check_process_success(&output, "display-message")?;
+        let output = self
+            .run(&["display-message", "-p", "-F", "#{client_name}"])?
+            .output("display-message")?;
 
-        let name = String::from_utf8(output.stdout)?.trim_end().to_string();
+        let name = String::from_utf8(output)?.trim_end().to_string();
         if name.is_empty() {
             return Err(Error::TmuxConfig("tmux named no current client"));
         }
@@ -111,10 +111,11 @@ impl Tmux {
     ///
     /// Returns an error if tmux fails or emits a malformed client record.
     pub fn most_recent_client_name(&self) -> Result<Option<String>> {
-        let output = self.output(&["list-clients", "-F", CLIENT_LIST_FORMAT.as_str()])?;
-        check_process_success(&output, "list-clients")?;
+        let output = self
+            .run(&["list-clients", "-F", CLIENT_LIST_FORMAT.as_str()])?
+            .output("list-clients")?;
 
-        let stdout = normalize_tmux_output(&output.stdout)
+        let stdout = normalize_tmux_output(&output)
             .map_err(|e| map_byte_parse_error("Client", CLIENT_LIST_INTENT.as_str(), e))?;
         let clients = decode_all(&stdout, CLIENT_LIST_FIELDS, ClientActivity::decode)
             .map_err(|e| map_byte_parse_error("Client", CLIENT_LIST_INTENT.as_str(), e))?;
@@ -124,8 +125,8 @@ impl Tmux {
 
     /// Display `message` in the status line of the current client.
     pub fn display_message(&self, message: &str) -> Result<()> {
-        let output = self.output(&["display-message", message])?;
-        check_empty_process_output(&output, "display-message")
+        self.run(&["display-message", message])?
+            .no_output("display-message")
     }
 
     /// Display `message` in the status line of the client named `target`.
@@ -151,8 +152,8 @@ impl Tmux {
     /// targets a client either: `-t` names a pane, and the message still goes
     /// to the current client. [`Self::display_message`] is unaffected.
     pub fn display_message_to(&self, target: &str, message: &str) -> Result<()> {
-        let output = self.output(&["display-message", "-c", target, message])?;
-        check_empty_process_output(&output, "display-message")
+        self.run(&["display-message", "-c", target, message])?
+            .no_output("display-message")
     }
 
     /// Switch the current client to the session exactly named `session_name`.
@@ -167,8 +168,8 @@ impl Tmux {
 
         let exact_session_name = format!("={session_name}");
 
-        let output = self.output(&["switch-client", "-t", &exact_session_name])?;
-        check_empty_process_output(&output, "switch-client")
+        self.run(&["switch-client", "-t", &exact_session_name])?
+            .no_output("switch-client")
     }
 }
 

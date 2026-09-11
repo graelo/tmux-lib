@@ -5,12 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{
-    Result,
-    error::{Error, check_empty_process_output},
-    tmux::Tmux,
-    wire::options::parse_options,
-};
+use crate::{Result, error::Error, tmux::Tmux, wire::options::parse_options};
 
 /// Maximum time to wait for the server to become ready.
 const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -25,8 +20,8 @@ impl Tmux {
     /// This waits for the server to be fully ready before returning, so a
     /// subsequent command can be issued immediately.
     pub fn start_server(&self, initial_session_name: &str) -> Result<()> {
-        let output = self.output(&["new-session", "-d", "-s", initial_session_name])?;
-        check_empty_process_output(&output, "new-session")?;
+        self.run(&["new-session", "-d", "-s", initial_session_name])?
+            .no_output("new-session")?;
 
         self.wait_for_server_ready()
     }
@@ -37,7 +32,7 @@ impl Tmux {
         let deadline = Instant::now() + SERVER_READY_TIMEOUT;
 
         loop {
-            if self.output(&["list-sessions"])?.status.success() {
+            if self.run(&["list-sessions"])?.succeeded() {
                 return Ok(());
             }
 
@@ -57,8 +52,8 @@ impl Tmux {
     pub fn kill_session(&self, name: &str) -> Result<()> {
         let exact_name = format!("={name}");
 
-        let output = self.output(&["kill-session", "-t", &exact_name])?;
-        check_empty_process_output(&output, "kill-session")
+        self.run(&["kill-session", "-t", &exact_name])?
+            .no_output("kill-session")
     }
 
     /// Return the value of one tmux option, or `None` when it is unset.
@@ -77,8 +72,8 @@ impl Tmux {
         }
         args.push(option_name);
 
-        let output = self.output(&args)?;
-        let buffer = String::from_utf8(output.stdout)?;
+        let output = self.run(&args)?.output("show-options")?;
+        let buffer = String::from_utf8(output)?;
         let buffer = buffer.trim_end();
 
         if buffer.is_empty() {
@@ -95,8 +90,8 @@ impl Tmux {
             vec!["show-options"]
         };
 
-        let output = self.output(&args)?;
-        let buffer = String::from_utf8(output.stdout)?;
+        let output = self.run(&args)?.output("show-options")?;
+        let buffer = String::from_utf8(output)?;
 
         Ok(parse_options(&buffer))
     }

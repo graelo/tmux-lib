@@ -4,9 +4,7 @@ use nom::{Parser, character::complete::char, combinator::all_consuming};
 
 use crate::{
     Result,
-    error::{
-        check_empty_process_output, check_process_success, map_add_intent, map_byte_parse_error,
-    },
+    error::{map_add_intent, map_byte_parse_error},
     pane::Pane,
     pane_id::{PaneId, parse::pane_id},
     session::Session,
@@ -25,9 +23,10 @@ use crate::{
 impl Tmux {
     /// Return every `Window` from every session.
     pub fn available_windows(&self) -> Result<Vec<Window>> {
-        let output = self.output(&["list-windows", "-a", "-F", WINDOW_FORMAT.as_str()])?;
-        check_process_success(&output, "list-windows")?;
-        let stdout = normalize_tmux_output(&output.stdout)
+        let output = self
+            .run(&["list-windows", "-a", "-F", WINDOW_FORMAT.as_str()])?
+            .output("list-windows")?;
+        let stdout = normalize_tmux_output(&output)
             .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))?;
         decode_all(&stdout, WINDOW_FIELDS, Window::decode)
             .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))
@@ -72,13 +71,11 @@ impl Tmux {
             args.push(pane_command);
         }
 
-        let output = self.output(&args)?;
+        // The reply is checked before parsing, so that a failing tmux does
+        // not surface as a confusing parse error over whatever it printed.
+        let output = self.run(&args)?.output("new-window")?;
 
-        // Check exit status before parsing to avoid confusing parse errors
-        // when tmux fails and returns empty/garbage stdout.
-        check_process_success(&output, "new-window")?;
-
-        let buffer = String::from_utf8(output.stdout)?;
+        let buffer = String::from_utf8(output)?;
         let buffer = buffer.trim_end();
 
         let (_, (new_window_id, _, new_pane_id)) = all_consuming((window_id, char(':'), pane_id))
@@ -90,13 +87,13 @@ impl Tmux {
 
     /// Apply `layout` to the window with `window_id`.
     pub fn set_layout(&self, layout: &str, window_id: &WindowId) -> Result<()> {
-        let output = self.output(&["select-layout", "-t", window_id.as_str(), layout])?;
-        check_empty_process_output(&output, "select-layout")
+        self.run(&["select-layout", "-t", window_id.as_str(), layout])?
+            .no_output("select-layout")
     }
 
     /// Select (make active) the window with `window_id`.
     pub fn select_window(&self, window_id: &WindowId) -> Result<()> {
-        let output = self.output(&["select-window", "-t", window_id.as_str()])?;
-        check_empty_process_output(&output, "select-window")
+        self.run(&["select-window", "-t", window_id.as_str()])?
+            .no_output("select-window")
     }
 }

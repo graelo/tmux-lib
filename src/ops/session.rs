@@ -4,7 +4,7 @@ use nom::{Parser, character::complete::char, combinator::all_consuming};
 
 use crate::{
     Result,
-    error::{check_process_success, map_add_intent, map_byte_parse_error},
+    error::{map_add_intent, map_byte_parse_error},
     pane::Pane,
     pane_id::{PaneId, parse::pane_id},
     session::Session,
@@ -24,9 +24,10 @@ use crate::{
 impl Tmux {
     /// Return every `Session` on the server.
     pub fn available_sessions(&self) -> Result<Vec<Session>> {
-        let output = self.output(&["list-sessions", "-F", SESSION_FORMAT.as_str()])?;
-        check_process_success(&output, "list-sessions")?;
-        let stdout = normalize_tmux_output(&output.stdout)
+        let output = self
+            .run(&["list-sessions", "-F", SESSION_FORMAT.as_str()])?
+            .output("list-sessions")?;
+        let stdout = normalize_tmux_output(&output)
             .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))?;
         decode_all(&stdout, SESSION_FIELDS, Session::decode)
             .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))
@@ -67,13 +68,11 @@ impl Tmux {
             args.push(pane_command);
         }
 
-        let output = self.output(&args)?;
+        // The reply is checked before parsing, so that a failing tmux does
+        // not surface as a confusing parse error over whatever it printed.
+        let output = self.run(&args)?.output("new-session")?;
 
-        // Check exit status before parsing to avoid confusing parse errors
-        // when tmux fails and returns empty/garbage stdout.
-        check_process_success(&output, "new-session")?;
-
-        let buffer = String::from_utf8(output.stdout)?;
+        let buffer = String::from_utf8(output)?;
         let buffer = buffer.trim_end();
 
         let (_, (new_session_id, _, new_window_id, _, new_pane_id)) =
