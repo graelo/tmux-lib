@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- `Error::UnsupportedArgument`, for an argument the transport in use cannot
+  carry. The control transport sends one command per line, so an argument
+  holding a newline is refused rather than truncated
+
 ### Changed
 
 - **Breaking:** remove `error::check_process_success` and

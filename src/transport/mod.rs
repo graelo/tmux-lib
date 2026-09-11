@@ -5,6 +5,7 @@
 //! identity, arguments carrying arbitrary bytes, and commands that kill the
 //! attached session each need a fork/exec path to fall back to.
 
+pub(crate) mod control;
 pub(crate) mod reply;
 pub(crate) mod spawning;
 
