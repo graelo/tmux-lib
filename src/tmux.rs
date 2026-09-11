@@ -2,7 +2,7 @@
 
 use crate::{
     Result,
-    transport::{Reply, Spawning},
+    transport::{Control, Reply, Spawning, Transport},
 };
 
 /// Which tmux server to talk to.
@@ -37,9 +37,8 @@ impl Server {
 /// A handle onto a tmux server.
 ///
 /// Every operation is an inherent method taking `&self`, so one handle can be
-/// shared across threads. Constructing it costs nothing and cannot fail: the
-/// spawning transport forks a client per command and holds no state between
-/// them.
+/// shared across threads. Cloning is cheap and shares whatever connection the
+/// handle has.
 ///
 /// ```no_run
 /// let tmux = tmux_lib::Tmux::spawning();
@@ -49,9 +48,22 @@ impl Server {
 /// }
 /// # Ok::<(), tmux_lib::error::Error>(())
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// # Choosing a transport
+///
+/// [`Tmux::spawning`] forks a `tmux` client per command. It costs nothing to
+/// construct, cannot fail, attaches no client, and needs no session to exist.
+/// A program that runs a handful of commands and exits should use it.
+///
+/// [`Tmux::control`] keeps one client attached and sends every command down
+/// it, so a command costs a round trip on an open pipe rather than a fork, an
+/// exec and a connect. It pays for itself over many commands. It needs a
+/// session to attach to, and the attached client is visible to the user: it
+/// bumps `#{session_attached}` and fires the `client-attached` and
+/// `client-detached` hooks.
+#[derive(Debug, Clone)]
 pub struct Tmux {
-    transport: Spawning,
+    transport: Transport,
 }
 
 impl Tmux {
@@ -70,7 +82,52 @@ impl Tmux {
     /// ```
     pub fn spawning_on(server: Server) -> Tmux {
         Tmux {
-            transport: Spawning::new(server),
+            transport: Transport::Spawning(Spawning::new(server)),
+        }
+    }
+
+    /// Talk to the default tmux server over one attached control client.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ControlAttachFailed`] when tmux will not give us a
+    /// client. The ordinary cause is that there is no session to attach to,
+    /// which is also the state a tool restoring a session from a backup starts
+    /// in. There is no constructor that falls back on your behalf, because
+    /// which transport you ended up with changes what the handle costs and
+    /// what it can do; write the fallback where it can be seen:
+    ///
+    /// ```no_run
+    /// use tmux_lib::Tmux;
+    ///
+    /// let tmux = Tmux::control().unwrap_or_else(|_| Tmux::spawning());
+    /// ```
+    ///
+    /// [`Error::ControlAttachFailed`]: crate::error::Error::ControlAttachFailed
+    pub fn control() -> Result<Tmux> {
+        Tmux::control_on(Server::Default)
+    }
+
+    /// Talk to `server` over one attached control client.
+    ///
+    /// # Errors
+    ///
+    /// See [`Tmux::control`].
+    pub fn control_on(server: Server) -> Result<Tmux> {
+        Ok(Tmux {
+            transport: Transport::Control(Control::connect(server)?),
+        })
+    }
+
+    /// Release the attached control client, if this handle has one.
+    ///
+    /// The next command attaches again. A spawning handle has nothing to
+    /// release, so this does nothing. Worth calling when a long-running
+    /// program is done talking to tmux for a while, since an attached client
+    /// is visible to the user.
+    pub fn disconnect(&self) {
+        if let Transport::Control(control) = &self.transport {
+            control.disconnect();
         }
     }
 

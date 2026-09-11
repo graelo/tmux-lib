@@ -29,10 +29,8 @@ pub(crate) struct Reply {
 impl Reply {
     /// A command tmux reported as succeeding.
     ///
-    /// Only the tests build one directly today; the control transport, which
-    /// has a block body and a terminator rather than a process to convert,
-    /// is the caller this exists for.
-    #[allow(dead_code)]
+    /// The control transport builds its replies this way: it has a block body
+    /// and a terminator rather than a process to convert.
     pub(crate) fn success(body: Vec<u8>) -> Reply {
         Reply {
             body,
@@ -42,9 +40,6 @@ impl Reply {
     }
 
     /// A command tmux reported as failing, carrying its message.
-    ///
-    /// See [`Reply::success`] on why this has no caller outside the tests yet.
-    #[allow(dead_code)]
     pub(crate) fn failure(diagnostic: Vec<u8>) -> Reply {
         Reply {
             body: Vec::new(),

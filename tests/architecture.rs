@@ -141,6 +141,24 @@ fn only_the_wire_module_spells_the_framed_protocol() {
 }
 
 #[test]
+fn only_the_control_module_spells_the_line_protocol() {
+    // The block markers, specifically. A second transport was the reason the
+    // first two invariants exist; this is the one that keeps *its* protocol
+    // from spreading the same way, now that operations are written against a
+    // reply type rather than against either transport's wire format.
+    for needle in ["%begin", "%end ", "%error ", "%exit"] {
+        let offenders = offenders(needle, "src/transport/control");
+
+        assert!(
+            offenders.is_empty(),
+            "`{needle}` is part of the control-mode line protocol and belongs \
+             only in src/transport/control. Found it in:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+}
+
+#[test]
 fn the_handle_can_be_shared_across_threads() {
     fn assert_shareable<T: Send + Sync + Clone>() {}
 

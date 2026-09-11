@@ -27,6 +27,29 @@ pub enum Error {
         argument: String,
     },
 
+    /// A control client could not be attached.
+    ///
+    /// The ordinary cause is that there is no session to attach to: a control
+    /// client is a client, not a session, so one has to exist already. The
+    /// message is whatever tmux said on its way out.
+    #[error("cannot attach a control client: `{message}`")]
+    ControlAttachFailed {
+        /// What tmux said.
+        message: String,
+    },
+
+    /// The control connection ended while a command was in flight.
+    ///
+    /// The command may or may not have taken effect — `kill-session` on the
+    /// attached session ends the connection precisely by succeeding — so it is
+    /// reported rather than retried. The handle attaches again on the next
+    /// command.
+    #[error("the control connection to tmux ended: `{reason}`")]
+    ControlDisconnected {
+        /// Why the connection ended, as far as tmux said.
+        reason: String,
+    },
+
     /// Indicates Tmux has a weird config, like missing the `"default-shell"`.
     #[error("unexpected tmux config: `{0}`")]
     TmuxConfig(&'static str),
