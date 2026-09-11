@@ -10,9 +10,10 @@
 # as a length-framed transport for pane contents — which is what a future
 # control-mode transport wants it for.
 #
-# Two checks, both fatal: load known bytes into a buffer and require the
-# readback and the advertised `#{buffer_size}` to match the input exactly, then
-# read one pane both ways and require the two routes to agree.
+# Three checks, all fatal: load known bytes into a buffer and require the
+# readback and the advertised `#{buffer_size}` to match the input exactly, read
+# one pane both ways and require the two routes to agree, and set an option
+# over a control connection and require the argument to arrive unchanged.
 #
 # Every released tmux answers this identically forever, so the rows in the
 # matrix are settled; the point is that a version added later answers it
@@ -119,6 +120,68 @@ if cmp -s "$work/direct" "$work/buffered"; then
 else
   echo "FAIL  capture-pane -p and capture-pane -b diverge on this version"
   diff <(od -c "$work/direct") <(od -c "$work/buffered") || true
+  status=1
+fi
+
+# Can an argument survive tmux's command lexer on a control connection? The
+# control transport sends one command per line, so every argument is
+# single-quoted, and an embedded single quote is written the way a shell writes
+# it — close, escape, reopen. That relies on tmux processing a backslash escape
+# outside quotes and no escape at all inside them.
+#
+# Each value is set twice: once over the control connection, and once by
+# forking a client, where the argument never meets the lexer. The two readbacks
+# are then compared against each other rather than against the literal, so that
+# a version escaping its *output* — which 3.4 and 3.5 do — cannot be mistaken
+# for a quoting failure on the way in.
+
+# Single-quote one argument the way the crate's `quoting` module does.
+sq() {
+  local escaped=${1//\'/\'\\\'\'}
+  printf "'%s'" "$escaped"
+}
+
+names=(plain spaces single double backslash dollar semicolon hash utf8 format trailing)
+values=(
+  'simple'
+  'two words'
+  "it's here"
+  'say "hi"'
+  'back\slash'
+  '$HOME and #{pane_id}'
+  'a ; b'
+  '# comment?'
+  'π café'
+  '#{?a,b,c}'
+  'ends with \'
+)
+
+for i in "${!names[@]}"; do
+  printf 'set-option -g @ctrl_%s %s\n' "${names[i]}" "$(sq "${values[i]}")"
+done | tmux -u -L "$socket" -C attach -f no-output,ignore-size >"$work/control" 2>&1
+
+for i in "${!names[@]}"; do
+  tmux -u -L "$socket" set-option -g "@spawn_${names[i]}" "${values[i]}"
+done
+
+quoting_ok=1
+for i in "${!names[@]}"; do
+  via_control=$(tmux -u -L "$socket" show-options -g -v "@ctrl_${names[i]}" 2>&1 || true)
+  via_spawn=$(tmux -u -L "$socket" show-options -g -v "@spawn_${names[i]}" 2>&1 || true)
+
+  if [ "$via_control" != "$via_spawn" ]; then
+    echo "FAIL  control-mode quoting altered '${names[i]}'"
+    echo "        via control: $(printf '%s' "$via_control" | od -c | head -3)"
+    echo "        via spawn:   $(printf '%s' "$via_spawn" | od -c | head -3)"
+    quoting_ok=0
+  fi
+done
+
+if [ "$quoting_ok" = 1 ]; then
+  echo "PASS  every argument survives the control-mode command lexer"
+else
+  echo "--- control connection transcript ---"
+  cat "$work/control"
   status=1
 fi
 
