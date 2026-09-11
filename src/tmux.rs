@@ -156,6 +156,12 @@ impl Tmux {
     pub(crate) fn run(&self, argv: &[&str]) -> Result<Reply> {
         self.transport.run(argv)
     }
+
+    /// Run one tmux command by forking a client, whatever transport this
+    /// handle otherwise uses. See [`Transport::run_spawned`].
+    pub(crate) fn run_spawned(&self, argv: &[&str]) -> Result<Reply> {
+        self.transport.run_spawned(argv)
+    }
 }
 
 #[cfg(test)]

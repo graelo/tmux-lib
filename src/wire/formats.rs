@@ -19,8 +19,11 @@ pub(crate) const CLIENT_FIELDS: &[Field] = &[
 /// `client_name` is a terminal path today, but it is user-visible state and is
 /// framed like any other, rather than joined with a separator this crate would
 /// then have to forbid.
-pub(crate) const CLIENT_LIST_FIELDS: &[Field] =
-    &[Field::Token("client_activity"), Field::Data("client_name")];
+pub(crate) const CLIENT_LIST_FIELDS: &[Field] = &[
+    Field::Token("client_activity"),
+    Field::Flag("client_control_mode"),
+    Field::Data("client_name"),
+];
 
 /// Fields of a `list-panes` record.
 pub(crate) const PANE_FIELDS: &[Field] = &[

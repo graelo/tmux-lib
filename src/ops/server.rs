@@ -20,7 +20,10 @@ impl Tmux {
     /// This waits for the server to be fully ready before returning, so a
     /// subsequent command can be issued immediately.
     pub fn start_server(&self, initial_session_name: &str) -> Result<()> {
-        self.run(&["new-session", "-d", "-s", initial_session_name])?
+        // Forks a client throughout: this runs when there may be no server at
+        // all, which is exactly when there is nothing to attach a control
+        // client to.
+        self.run_spawned(&["new-session", "-d", "-s", initial_session_name])?
             .no_output("new-session")?;
 
         self.wait_for_server_ready()
@@ -32,7 +35,7 @@ impl Tmux {
         let deadline = Instant::now() + SERVER_READY_TIMEOUT;
 
         loop {
-            if self.run(&["list-sessions"])?.succeeded() {
+            if self.run_spawned(&["list-sessions"])?.succeeded() {
                 return Ok(());
             }
 
@@ -49,10 +52,14 @@ impl Tmux {
     }
 
     /// Remove the session exactly named `name`.
+    ///
+    /// This forks a client even on a control handle. Killing the session a
+    /// control client is attached to ends the connection by succeeding, which
+    /// would be reported as a failure.
     pub fn kill_session(&self, name: &str) -> Result<()> {
         let exact_name = format!("={name}");
 
-        self.run(&["kill-session", "-t", &exact_name])?
+        self.run_spawned(&["kill-session", "-t", &exact_name])?
             .no_output("kill-session")
     }
 

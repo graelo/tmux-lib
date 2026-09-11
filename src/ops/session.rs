@@ -68,9 +68,13 @@ impl Tmux {
             args.push(pane_command);
         }
 
+        // Forks a client: the session and window names and the working
+        // directory are not this crate's to vouch for, and the control
+        // connection takes one command per line.
+        //
         // The reply is checked before parsing, so that a failing tmux does
         // not surface as a confusing parse error over whatever it printed.
-        let output = self.run(&args)?.output("new-session")?;
+        let output = self.run_spawned(&args)?.output("new-session")?;
 
         let buffer = String::from_utf8(output)?;
         let buffer = buffer.trim_end();

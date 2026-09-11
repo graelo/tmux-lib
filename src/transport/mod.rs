@@ -63,6 +63,19 @@ impl Transport {
         }
     }
 
+    /// Run a command by forking a client, whichever transport this is.
+    ///
+    /// Some operations cannot use a control connection even when the handle
+    /// has one: those whose target is implicitly the calling client, those
+    /// carrying an argument that may hold a newline, and those that may kill
+    /// the session the connection is attached to. They say so by calling this.
+    pub(crate) fn run_spawned(&self, argv: &[&str]) -> Result<Reply> {
+        match self {
+            Transport::Spawning(spawning) => spawning.run(argv),
+            Transport::Control(control) => control.spawning().run(argv),
+        }
+    }
+
     pub(crate) fn server(&self) -> &Server {
         match self {
             Transport::Spawning(spawning) => spawning.server(),

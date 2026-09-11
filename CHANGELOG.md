@@ -38,6 +38,15 @@ and this project adheres to
 
 ### Fixed
 
+- `current_client` and `current_client_name` report no client rather than
+  naming a control client. When the caller is not itself inside a tmux client,
+  tmux answers "who is calling" with whichever client it considers best, and
+  once any control client is attached — this crate's own, or one belonging to
+  another tool reading tmux — that is the one it picks. Forking a client does
+  not avoid it: the answer depends on what is attached to the server
+- `most_recent_client_name` skips control clients. They are listed like any
+  other client and are typically the most recently active, but they have no
+  status line to report to
 - `Tmux::command` reports a failing tmux command instead of handing back
   whatever it left on stdout
 - `show_option` and `show_options` report a failing tmux command instead of
