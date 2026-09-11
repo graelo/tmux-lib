@@ -18,6 +18,9 @@ and this project adheres to
 - `Tmux::disconnect`, releasing the attached client. The next command attaches
   again; a spawning handle has nothing to release
 - `Error::ControlAttachFailed` and `Error::ControlDisconnected`
+- Every operation's integration test runs twice, once on each transport, so
+  that a control handle and a spawning one are known to answer alike rather
+  than assumed to
 - `ci/tmux_wire_probe.sh` checks that an argument survives tmux's command
   lexer on a control connection, so the crate's quoting rule is answered on
   every row of the version matrix rather than on the developer's tmux alone
