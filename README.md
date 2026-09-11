@@ -15,7 +15,7 @@ any use of it with its usage string.
 
 ```toml
 [dependencies]
-tmux-lib = "0.6"
+tmux-lib = "0.7"
 ```
 
 ## Getting started
@@ -48,6 +48,37 @@ fn main() -> Result<()> {
 The handle is `Send + Sync + Clone`, so it can be shared as-is or wrapped in
 an `Arc`. Its methods block; from an async caller, bridge with your runtime's
 blocking helper, such as `smol::unblock(move || tmux.available_panes())`.
+
+## Choosing a transport
+
+`Tmux::spawning()` forks a `tmux` client per command. It costs nothing to
+construct, cannot fail, attaches no client, and needs no session to exist.
+
+`Tmux::control()` keeps one `tmux -C` client attached and sends every command
+down it, so a command costs a round trip on an open pipe rather than a fork,
+an exec and a connect. It pays for itself over many commands, and it needs a
+session to attach to:
+
+```rust
+use tmux_lib::Tmux;
+
+// There is no constructor that falls back on your behalf: which transport you
+// ended up with changes what the handle costs, so write it where it shows.
+let tmux = Tmux::control().unwrap_or_else(|_| Tmux::spawning());
+```
+
+A control handle is not a different API. Every operation exists on both, and
+the ones a control connection cannot carry fork a client themselves: captures,
+anything creating a pane, window or session, anything about the calling
+client, and killing a session. Two consequences are worth knowing:
+
+- an attached control client is visible. It bumps `#{session_attached}` and
+  fires the `client-attached` and `client-detached` hooks. Call
+  `Tmux::disconnect` to release it;
+- while any control client is attached — this crate's, or another tool's —
+  tmux resolves "the current client" to it for a caller that is not itself
+  inside a tmux client. `current_client` and `current_client_name` report no
+  client in that case rather than naming it.
 
 ## Caveats
 
