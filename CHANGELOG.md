@@ -10,6 +10,9 @@ and this project adheres to
 
 ### Added
 
+- `ci/tmux_wire_probe.sh` checks that an argument survives tmux's command
+  lexer on a control connection, so the crate's quoting rule is answered on
+  every row of the version matrix rather than on the developer's tmux alone
 - `Error::UnsupportedArgument`, for an argument the transport in use cannot
   carry. The control transport sends one command per line, so an argument
   holding a newline is refused rather than truncated
