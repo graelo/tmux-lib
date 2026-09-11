@@ -15,6 +15,18 @@ pub enum Error {
         stderr: String,
     },
 
+    /// An argument cannot be carried by the transport in use.
+    ///
+    /// The control transport sends one command per line and tmux does not
+    /// continue an unterminated quote across lines, so an argument holding a
+    /// newline would be truncated and its remainder read as a command. The
+    /// spawning transport has no such limit.
+    #[error("argument holds a newline, which the control transport cannot carry: `{argument}`")]
+    UnsupportedArgument {
+        /// The argument that cannot be sent.
+        argument: String,
+    },
+
     /// Indicates Tmux has a weird config, like missing the `"default-shell"`.
     #[error("unexpected tmux config: `{0}`")]
     TmuxConfig(&'static str),
