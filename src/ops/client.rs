@@ -15,9 +15,11 @@ use crate::{
     },
 };
 
-/// One `list-clients` row: a client's name, and when it was last active.
+/// One `list-clients` row: a client's name, when it was last active, and
+/// whether it is a control client.
 struct ClientActivity {
     activity: u64,
+    control_mode: bool,
     name: String,
 }
 
@@ -29,9 +31,14 @@ impl ClientActivity {
             .token("client activity")?
             .parse()
             .map_err(|_| ByteParseError::new("invalid client activity"))?;
+        let control_mode = reader.flag("client control mode")?;
         let name = reader.required_data("client name")?;
 
-        Ok(ClientActivity { activity, name })
+        Ok(ClientActivity {
+            activity,
+            control_mode,
+            name,
+        })
     }
 }
 
@@ -47,11 +54,40 @@ impl Tmux {
     /// # Errors
     ///
     /// Returns an error if tmux fails or emits a malformed client record.
+    /// Returns the attributes of the client issuing this command, or `None`
+    /// when the caller is not running inside one.
     pub fn current_client(&self) -> Result<Option<Client>> {
-        let client =
-            self.client_record(&["display-message", "-p", "-F", CLIENT_FORMAT.as_str()])?;
+        if self.current_client_is_control()? {
+            return Ok(None);
+        }
+
+        let output = self
+            .run_spawned(&["display-message", "-p", "-F", CLIENT_FORMAT.as_str()])?
+            .output("display-message")?;
+        let client = self.decode_client(&output)?;
 
         Ok((!client.session_name.is_empty()).then_some(client))
+    }
+
+    /// Whether tmux resolves "the current client" to a control client.
+    ///
+    /// When the caller is not itself inside a tmux client, tmux answers with
+    /// whichever client it considers best rather than with nothing — and once
+    /// any control client is attached, that is the one it picks. Forking a
+    /// client does not avoid it: the answer depends on what is attached to the
+    /// server, not on how the question was asked. This crate attaches one for
+    /// [`Tmux::control`], and a tool reading tmux over its own control
+    /// connection attaches another.
+    ///
+    /// A control client has no status line and no user watching it, so it is
+    /// never the answer to "who is calling". Reporting no client is both
+    /// truthful and the state the caller already has to handle.
+    fn current_client_is_control(&self) -> Result<bool> {
+        let output = self
+            .run_spawned(&["display-message", "-p", "-F", "#{client_control_mode}"])?
+            .output("display-message")?;
+
+        Ok(String::from_utf8(output)?.trim_end() == "1")
     }
 
     /// Return the attributes of the client attached to `target`.
@@ -60,19 +96,24 @@ impl Tmux {
     /// record format is this crate's own, and a caller that spells it out will
     /// silently drift from it.
     pub fn client_for_target(&self, target: &str) -> Result<Client> {
-        self.client_record(&[
-            "display-message",
-            "-t",
-            target,
-            "-p",
-            "-F",
-            CLIENT_FORMAT.as_str(),
-        ])
+        // Unlike `current_client`, the client asked about is named, so the
+        // transport in use cannot change the answer.
+        let output = self
+            .run(&[
+                "display-message",
+                "-t",
+                target,
+                "-p",
+                "-F",
+                CLIENT_FORMAT.as_str(),
+            ])?
+            .output("display-message")?;
+
+        self.decode_client(&output)
     }
 
-    fn client_record(&self, argv: &[&str]) -> Result<Client> {
-        let output = self.run(argv)?.output("display-message")?;
-        let stdout = normalize_tmux_output(&output)
+    fn decode_client(&self, output: &[u8]) -> Result<Client> {
+        let stdout = normalize_tmux_output(output)
             .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))?;
         decode_one(&stdout, CLIENT_FIELDS, Client::decode)
             .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))
@@ -89,11 +130,17 @@ impl Tmux {
     /// Returns an error if tmux fails, or if it names no client — which is
     /// what happens outside a tmux client, where there is nothing to name.
     pub fn current_client_name(&self) -> Result<String> {
-        let output = self
-            .run(&["display-message", "-p", "-F", "#{client_name}"])?
-            .output("display-message")?;
+        // A control client is never the answer; see
+        // [`Self::current_client_is_control`].
+        let name = if self.current_client_is_control()? {
+            String::new()
+        } else {
+            let output = self
+                .run_spawned(&["display-message", "-p", "-F", "#{client_name}"])?
+                .output("display-message")?;
+            String::from_utf8(output)?.trim_end().to_owned()
+        };
 
-        let name = String::from_utf8(output)?.trim_end().to_string();
         if name.is_empty() {
             return Err(Error::TmuxConfig("tmux named no current client"));
         }
@@ -125,7 +172,10 @@ impl Tmux {
 
     /// Display `message` in the status line of the current client.
     pub fn display_message(&self, message: &str) -> Result<()> {
-        self.run(&["display-message", message])?
+        // Forks a client: the message is the caller's text, which the
+        // control connection cannot carry across a newline, and "the current
+        // client" on a control connection is the connection itself.
+        self.run_spawned(&["display-message", message])?
             .no_output("display-message")
     }
 
@@ -152,7 +202,8 @@ impl Tmux {
     /// targets a client either: `-t` names a pane, and the message still goes
     /// to the current client. [`Self::display_message`] is unaffected.
     pub fn display_message_to(&self, target: &str, message: &str) -> Result<()> {
-        self.run(&["display-message", "-c", target, message])?
+        // Forks a client, for the reason given on [`Self::display_message`].
+        self.run_spawned(&["display-message", "-c", target, message])?
             .no_output("display-message")
     }
 
@@ -168,15 +219,24 @@ impl Tmux {
 
         let exact_session_name = format!("={session_name}");
 
-        self.run(&["switch-client", "-t", &exact_session_name])?
+        // Forks a client: on a control connection this would switch the
+        // connection's own client rather than the caller's.
+        self.run_spawned(&["switch-client", "-t", &exact_session_name])?
             .no_output("switch-client")
     }
 }
 
 /// Pick the name of the client that was active most recently.
+///
+/// Control clients are skipped. This crate attaches one itself for
+/// [`Tmux::control`], and any tool reading tmux over a control connection
+/// attaches its own; they are listed like any other client and are typically
+/// the most recently active, but they have no status line to report to and no
+/// user watching them.
 fn most_recent(clients: Vec<ClientActivity>) -> Option<String> {
     clients
         .into_iter()
+        .filter(|client| !client.control_mode)
         .max_by_key(|client| client.activity)
         .map(|client| client.name)
 }
@@ -187,10 +247,12 @@ mod tests {
     use crate::wire::{decode_all, formats::CLIENT_LIST_FIELDS};
 
     /// Frame a `list-clients` reply the way tmux would.
-    fn framed(rows: &[(&str, &str)]) -> Vec<u8> {
+    fn framed(rows: &[(&str, bool, &str)]) -> Vec<u8> {
         let mut record = Vec::new();
-        for (activity, name) in rows {
+        for (activity, control_mode, name) in rows {
             record.extend_from_slice(activity.as_bytes());
+            record.push(0x1f);
+            record.extend_from_slice(if *control_mode { b"true" } else { b"false" });
             record.push(0x1f);
             record.extend_from_slice(name.len().to_string().as_bytes());
             record.push(0x1f);
@@ -200,16 +262,16 @@ mod tests {
         record
     }
 
-    fn decode(rows: &[(&str, &str)]) -> Vec<ClientActivity> {
+    fn decode(rows: &[(&str, bool, &str)]) -> Vec<ClientActivity> {
         decode_all(&framed(rows), CLIENT_LIST_FIELDS, ClientActivity::decode).unwrap()
     }
 
     #[test]
     fn selects_the_most_recently_active_client() {
         let clients = decode(&[
-            ("10", "/dev/ttys001"),
-            ("22", "/dev/ttys002"),
-            ("15", "/dev/ttys003"),
+            ("10", false, "/dev/ttys001"),
+            ("22", false, "/dev/ttys002"),
+            ("15", false, "/dev/ttys003"),
         ]);
 
         assert_eq!(most_recent(clients).as_deref(), Some("/dev/ttys002"));
@@ -221,18 +283,35 @@ mod tests {
     }
 
     #[test]
+    fn a_control_client_is_never_the_one_picked() {
+        // This crate attaches one itself for `Tmux::control`, and it is
+        // typically the most recently active client on the server. It has no
+        // status line to report to.
+        let clients = decode(&[("10", false, "/dev/ttys001"), ("99", true, "client-6501")]);
+
+        assert_eq!(most_recent(clients).as_deref(), Some("/dev/ttys001"));
+    }
+
+    #[test]
+    fn only_control_clients_is_none() {
+        let clients = decode(&[("99", true, "client-6501")]);
+
+        assert_eq!(most_recent(clients), None);
+    }
+
+    #[test]
     fn a_non_numeric_activity_is_a_parse_error() {
         // The old hand-rolled reader skipped rows it could not parse, which
         // would silently report the wrong client. A malformed record is a
         // failure now.
-        let record = framed(&[("not-a-number", "/dev/ttys001")]);
+        let record = framed(&[("not-a-number", false, "/dev/ttys001")]);
 
         assert!(decode_all(&record, CLIENT_LIST_FIELDS, ClientActivity::decode).is_err());
     }
 
     #[test]
     fn a_client_name_may_contain_a_separator() {
-        let clients = decode(&[("5", "/dev/pts/1\tweird\nname")]);
+        let clients = decode(&[("5", false, "/dev/pts/1\tweird\nname")]);
 
         assert_eq!(
             most_recent(clients).as_deref(),

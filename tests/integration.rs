@@ -765,3 +765,133 @@ mod control_tests {
         );
     }
 }
+
+// ============================================================================
+// Operations a control handle must not carry over its connection
+// ============================================================================
+
+mod control_routing_tests {
+    use super::*;
+
+    #[test]
+    fn the_attached_control_client_is_never_offered_as_a_target() {
+        require_tmux!();
+        let server = TestServer::start("ctlpick");
+
+        let control = server.control();
+
+        // The control client this handle attached is a client, it is listed
+        // like any other, and it is the most recently active one on the
+        // server. It has no status line, so there is no client to report to.
+        assert_eq!(control.most_recent_client_name().unwrap(), None);
+        assert_eq!(server.tmux().most_recent_client_name().unwrap(), None);
+    }
+
+    #[test]
+    fn killing_the_attached_session_succeeds_rather_than_cutting_the_reply() {
+        require_tmux!();
+        let server = TestServer::start("ctlkill");
+        let survivor = unique_name("survivor");
+        server.raw(&["new-session", "-d", "-s", &survivor]);
+
+        let control = server.control();
+        let attached = String::from_utf8(
+            control
+                .command(&["display-message", "-p", "-F", "#{client_session}"])
+                .unwrap(),
+        )
+        .unwrap()
+        .trim_end()
+        .to_owned();
+
+        // Over the connection this would end the connection by succeeding,
+        // and the caller would be told the command failed.
+        control
+            .kill_session(&attached)
+            .expect("killing the attached session should succeed");
+
+        // `attach` with no target picks the most recently used session, so
+        // which of the two it landed on is not the test's business; that it is
+        // gone and the other is not, is.
+        let names: Vec<_> = server
+            .tmux()
+            .available_sessions()
+            .unwrap()
+            .into_iter()
+            .map(|session| session.name)
+            .collect();
+        assert_eq!(names.len(), 1, "one of the two sessions should remain");
+        assert!(!names.contains(&attached));
+        assert!(names.contains(&survivor) || names.contains(&server.session_name().to_owned()));
+    }
+
+    #[test]
+    fn a_control_handle_creates_panes_windows_and_sessions() {
+        require_tmux!();
+        let server = TestServer::start("ctlnew");
+        let control = server.control();
+
+        let window = server.window();
+        let pane = control
+            .available_panes()
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("the initial session has a pane");
+
+        let new_pane = control.new_pane(&pane, None, &window.id).unwrap();
+        assert!(
+            control
+                .available_panes()
+                .unwrap()
+                .iter()
+                .any(|p| p.id == new_pane)
+        );
+
+        let session = control
+            .available_sessions()
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let (new_window, _) = control.new_window(&session, &window, &pane, None).unwrap();
+        assert!(
+            control
+                .available_windows()
+                .unwrap()
+                .iter()
+                .any(|w| w.id == new_window)
+        );
+    }
+
+    #[test]
+    fn a_control_handle_captures_a_pane() {
+        require_tmux!();
+        let server = TestServer::start("ctlcap");
+        let control = server.control();
+
+        let pane = control
+            .available_panes()
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("the initial session has a pane");
+
+        let by_control = control.capture_pane(&pane.id).unwrap();
+        let by_spawning = server.tmux().capture_pane(&pane.id).unwrap();
+
+        assert_eq!(by_control, by_spawning);
+    }
+
+    #[test]
+    fn a_control_handle_reports_no_current_client_outside_one() {
+        require_tmux!();
+        let server = TestServer::start("ctlcur");
+
+        // Asked over the connection, this would describe the connection's own
+        // client and report a session. The test runner is not inside a tmux
+        // client of this server, so the answer is that there is none.
+        assert!(server.control().current_client().unwrap().is_none());
+        assert!(server.tmux().current_client().unwrap().is_none());
+    }
+}

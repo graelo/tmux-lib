@@ -35,8 +35,13 @@ impl Tmux {
     /// The output keeps escape codes and joined lines with trailing spaces,
     /// because tmux cannot both preserve escape codes and trim lines. Pass the
     /// result through [`crate::utils::cleanup_captured_buffer`].
+    ///
+    /// This forks a client even on a control handle, so that captures can run
+    /// in parallel, the largest payload a caller moves stays off the shared
+    /// connection, and a capture still works when no session exists to attach
+    /// to — which is the state a tool restoring from a backup starts in.
     pub fn capture_pane(&self, pane_id: &PaneId) -> Result<Vec<u8>> {
-        self.run(&[
+        self.run_spawned(&[
             "capture-pane",
             "-t",
             pane_id.as_str(),
@@ -81,9 +86,12 @@ impl Tmux {
             args.push(pane_command);
         }
 
+        // Forks a client: `-c <dirpath>` carries a path this crate did not
+        // choose, and the control connection takes one command per line.
+        //
         // The reply is checked before parsing, so that a failing tmux does
         // not surface as a confusing parse error over whatever it printed.
-        let output = self.run(&args)?.output("split-window")?;
+        let output = self.run_spawned(&args)?.output("split-window")?;
 
         let buffer = String::from_utf8(output)?;
 

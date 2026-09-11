@@ -22,7 +22,7 @@ use crate::{
     Result,
     error::Error,
     tmux::Server,
-    transport::{Reply, address},
+    transport::{Reply, Spawning, address},
 };
 
 use protocol::{Demux, Event};
@@ -36,6 +36,15 @@ use protocol::{Demux, Event};
 pub(crate) struct Control {
     server: Server,
     connection: Arc<Mutex<Connection>>,
+    /// The way out, for the operations this transport cannot carry.
+    ///
+    /// An attached control client is itself a client, so anything whose target
+    /// is implicitly "the calling client" would answer about us. It cannot
+    /// carry an argument holding a newline. And a command that kills the
+    /// attached session ends the connection by succeeding. Those operations
+    /// fork a client instead, which is why this is here rather than left to
+    /// the caller to arrange.
+    spawning: Spawning,
 }
 
 impl Control {
@@ -55,6 +64,7 @@ impl Control {
 
         Ok(Control {
             server: server.clone(),
+            spawning: Spawning::new(server.clone()),
             connection: Arc::new(Mutex::new(Connection {
                 server,
                 live: Some(live),
@@ -64,6 +74,11 @@ impl Control {
 
     pub(crate) fn server(&self) -> &Server {
         &self.server
+    }
+
+    /// The fork/exec transport onto the same server.
+    pub(crate) fn spawning(&self) -> &Spawning {
+        &self.spawning
     }
 
     /// Send one command and block until its reply block closes.
