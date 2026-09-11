@@ -6,41 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- `Tmux::current_client_name`, `Tmux::most_recent_client_name` and
-  `Tmux::display_message_to`, so a caller outside tmux can pick an attached
-  client and report to it without spawning tmux itself
-
-### Changed
-
-- **Breaking:** `Tmux::current_client` returns `Option<Client>`. Outside a
-  tmux client — a scheduler, a cron job, a plain shell — tmux answers
-  `display-message` with an empty session, and the framed decoder rejected it
-  as malformed. A caller running outside tmux could no longer describe the
-  client, which is a state to report rather than a failure
-- `Client` derives `Default`, so "no client" has a value to record
-- No `make` target passes `--locked`. This crate is a library, its
-  `Cargo.lock` is gitignored, and the versions that matter are the ones a
-  consumer's own lock file picks
-
-### Fixed
-
-- `show_option` queries the same scope as `show_options` — the global table
-  with `global`, the session table without it. It passed `-w` unconditionally,
-  so it asked for window options while `show_options` asked for session ones
-
-### Documentation
-
-- `Tmux::display_message_to` requires tmux 3.3. The compatibility matrix
-  showed 3.2 rejecting every call: it declares `display-message -c` without an
-  argument, so the client name is parsed as a second positional argument and
-  tmux answers with its usage string. Nothing on 3.2 targets a client, so this
-  is documented rather than worked around
-
-## [0.6.0] - 2026-09-05
+## [0.6.0] - 2026-09-11
 
 ### Changed
 
@@ -61,11 +27,20 @@ and this project adheres to
 - **Breaking:** `Error` is `#[non_exhaustive]`, and `Error::ParseError`
   carries a plain message rather than a `nom` error, which the record decoders
   no longer produce
+- **Breaking:** `Tmux::current_client` returns `Option<Client>`. Outside a
+  tmux client — a scheduler, a cron job, a plain shell — tmux answers
+  `display-message` with an empty session, and the framed decoder rejected it
+  as malformed. A caller running outside tmux could no longer describe the
+  client, which is a state to report rather than a failure
+- `Client` derives `Default`, so "no client" has a value to record
 - `Pane::capture` becomes `Tmux::capture_pane`, and `Pane`, `Window`,
   `Session` and `Client` no longer perform I/O
 - Make `README.md` the canonical crate overview and remove its
   `cargo-sync-readme` markers, and document the API there
 - Reduce crate-level Rust documentation to a link to the project README
+- No `make` target passes `--locked`. This crate is a library, its
+  `Cargo.lock` is gitignored, and the versions that matter are the ones a
+  consumer's own lock file picks
 
 ### Fixed
 
@@ -75,6 +50,9 @@ and this project adheres to
   paths under cron, launchd, or a bare systemd unit
 - `show_option` returned `"status off"` where it meant `"off"`; it asked tmux
   to print the option name alongside the value
+- `show_option` queries the same scope as `show_options` — the global table
+  with `global`, the session table without it. It passed `-w` unconditionally,
+  so it asked for window options while `show_options` asked for session ones
 - Use byte-length-prefixed tmux records when reading panes, sessions, windows,
   and client session names, preserving arbitrary UTF-8 values and newlines
 - Normalize visually escaped tmux 3.4–3.5 command output before parsing framed
@@ -86,6 +64,9 @@ and this project adheres to
 - `Server`, selecting the default tmux server, a socket name (`tmux -L`) or a
   socket path (`tmux -S`). Integration tests now run each case on their own
   private server instead of sharing the developer's
+- `Tmux::current_client_name`, `Tmux::most_recent_client_name` and
+  `Tmux::display_message_to`, so a caller outside tmux can pick an attached
+  client and report to it without spawning tmux itself
 - `src/wire/`, the single module that knows the framed record protocol. Format
   and intent strings are derived from a declared field list per record type
   rather than hand-escaped in four places
@@ -100,6 +81,14 @@ and this project adheres to
 - `rumdl.toml` applies consistent Markdown linting and formatting rules
 - `AGENTS.md` documents the project architecture, verification, and release
   conventions for coding agents
+
+### Documentation
+
+- `Tmux::display_message_to` requires tmux 3.3. The compatibility matrix
+  showed 3.2 rejecting every call: it declares `display-message -c` without an
+  argument, so the client name is parsed as a second positional argument and
+  tmux answers with its usage string. Nothing on 3.2 targets a client, so this
+  is documented rather than worked around
 
 ## [0.5.0] - 2026-04-18
 
