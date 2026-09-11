@@ -10,6 +10,14 @@ and this project adheres to
 
 ### Added
 
+- `Tmux::control` and `Tmux::control_on`, a second transport that keeps one
+  `tmux -C` client attached and sends every command down it, so a command
+  costs a round trip on an open pipe rather than a fork, an exec and a
+  connect. `Tmux::spawning` is unchanged and remains the right choice for a
+  program that runs a handful of commands and exits
+- `Tmux::disconnect`, releasing the attached client. The next command attaches
+  again; a spawning handle has nothing to release
+- `Error::ControlAttachFailed` and `Error::ControlDisconnected`
 - `ci/tmux_wire_probe.sh` checks that an argument survives tmux's command
   lexer on a control connection, so the crate's quoting rule is answered on
   every row of the version matrix rather than on the developer's tmux alone
@@ -19,6 +27,8 @@ and this project adheres to
 
 ### Changed
 
+- **Breaking:** `Tmux` no longer derives `PartialEq` and `Eq`. A handle may
+  now own a live connection, which has no sensible equality
 - **Breaking:** remove `error::check_process_success` and
   `error::check_empty_process_output`. Both took a `std::process::Output`,
   which no caller outside the crate can obtain from this API, and the control

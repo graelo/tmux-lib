@@ -103,6 +103,12 @@ impl TestServer {
             .expect("failed to run tmux")
     }
 
+    /// A control-transport handle onto this same private server.
+    fn control(&self) -> Tmux {
+        Tmux::control_on(Server::socket_name(&self.socket))
+            .expect("failed to attach a control client")
+    }
+
     /// The only window of the initial session.
     fn window(&self) -> Window {
         let windows = self
@@ -590,5 +596,172 @@ mod window_pane_ids_tests {
                 "pane {pane_id:?} should be listed"
             );
         }
+    }
+}
+
+// ============================================================================
+// Control transport
+// ============================================================================
+
+mod control_tests {
+    use super::*;
+
+    #[test]
+    fn a_control_handle_answers_what_a_spawning_handle_answers() {
+        require_tmux!();
+        let server = TestServer::start("ctl");
+
+        let spawned = server.tmux().available_sessions().unwrap();
+        let controlled = server.control().available_sessions().unwrap();
+
+        assert_eq!(spawned.len(), 1);
+        assert_eq!(
+            spawned.iter().map(|s| &s.name).collect::<Vec<_>>(),
+            controlled.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_control_client_is_a_client_not_a_session() {
+        require_tmux!();
+        let server = TestServer::start("ctlvis");
+
+        let control = server.control();
+
+        // Attaching must not show up as something to back up, which is what
+        // would have made a tool-owned placeholder session the wrong answer.
+        assert_eq!(control.available_sessions().unwrap().len(), 1);
+        assert_eq!(server.tmux().available_sessions().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_failing_command_is_reported_rather_than_parsed() {
+        require_tmux!();
+        let server = TestServer::start("ctlerr");
+
+        let error = server
+            .control()
+            .command(&["nosuchcommand"])
+            .expect_err("tmux should reject an unknown command");
+
+        assert!(
+            format!("{error}").contains("nosuchcommand"),
+            "the error should carry what tmux said, got: {error}"
+        );
+    }
+
+    #[test]
+    fn an_argument_the_command_lexer_would_mangle_arrives_intact() {
+        require_tmux!();
+        let server = TestServer::start("ctlquote");
+        let control = server.control();
+
+        let value = r#"it's "two words" \ and ; a #{format}"#;
+        control
+            .command(&["set-option", "-g", "@probe", value])
+            .unwrap();
+
+        // Read back over the spawning transport, where the argument never met
+        // the control-mode lexer, so a difference can only have come from the
+        // write.
+        assert_eq!(
+            server
+                .tmux()
+                .show_option("@probe", true)
+                .unwrap()
+                .as_deref(),
+            Some(value)
+        );
+    }
+
+    #[test]
+    fn an_argument_holding_a_newline_is_refused() {
+        require_tmux!();
+        let server = TestServer::start("ctlnl");
+
+        let error = server
+            .control()
+            .command(&["set-option", "-g", "@probe", "line1\nline2"])
+            .expect_err("a newline cannot be carried by the control transport");
+
+        assert!(
+            matches!(error, tmux_lib::error::Error::UnsupportedArgument { .. }),
+            "expected UnsupportedArgument, got: {error}"
+        );
+
+        // Refused before anything was written, so the connection still works.
+        assert!(server.control().available_sessions().is_ok());
+    }
+
+    #[test]
+    fn attaching_fails_when_there_is_no_session() {
+        require_tmux!();
+
+        // A socket no server is listening on: a control client is a client,
+        // so there is nothing for it to attach to. Addressed by path rather
+        // than by name, because the attempt leaves the socket file behind and
+        // this way the test knows where to find it.
+        let path = std::env::temp_dir().join(unique_name("sock-absent"));
+        let nowhere = Server::socket_path(path.to_str().unwrap());
+
+        let error = Tmux::control_on(nowhere).expect_err("there is no session to attach to");
+        let _ = std::fs::remove_file(&path);
+
+        let tmux_lib::error::Error::ControlAttachFailed { message } = &error else {
+            panic!("expected ControlAttachFailed, got: {error}");
+        };
+        assert!(
+            message.contains("no sessions"),
+            "the error should carry tmux's own reason, got: {message}"
+        );
+    }
+
+    #[test]
+    fn the_connection_comes_back_after_it_is_cut() {
+        require_tmux!();
+        let server = TestServer::start("ctlcut");
+
+        // A second session, so that killing the attached one leaves the server
+        // running and something to re-attach to.
+        let survivor = unique_name("survivor");
+        server.raw(&["new-session", "-d", "-s", &survivor]);
+
+        let control = server.control();
+        let attached = String::from_utf8(
+            control
+                .command(&["display-message", "-p", "-F", "#{client_session}"])
+                .unwrap(),
+        )
+        .unwrap()
+        .trim_end()
+        .to_owned();
+
+        // Kill it from the outside, the way a user or a restore would.
+        server.raw(&["kill-session", "-t", &format!("={attached}")]);
+
+        // The in-flight connection is gone, so the next command may report the
+        // disconnection; the one after it must work.
+        let _ = control.available_sessions();
+        let sessions = control
+            .available_sessions()
+            .expect("the handle should attach again after the connection ends");
+
+        assert!(sessions.iter().all(|s| s.name != attached));
+        assert!(!sessions.is_empty());
+    }
+
+    #[test]
+    fn disconnecting_releases_the_client_and_the_next_command_attaches_again() {
+        require_tmux!();
+        let server = TestServer::start("ctldrop");
+        let control = server.control();
+
+        assert!(control.available_sessions().is_ok());
+        control.disconnect();
+
+        assert!(
+            control.available_sessions().is_ok(),
+            "a command after disconnect should attach again"
+        );
     }
 }

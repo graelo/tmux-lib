@@ -71,13 +71,6 @@ impl Demux {
         Demux::default()
     }
 
-    /// Whether a block is currently open.
-    ///
-    /// End of stream while this holds means a command will never be answered.
-    pub(crate) fn in_block(&self) -> bool {
-        self.open.is_some()
-    }
-
     /// Interpret one line, returning an event when it completes one.
     pub(crate) fn line(&mut self, line: &[u8]) -> Option<Event> {
         match self.open.as_mut() {
@@ -331,15 +324,13 @@ mod tests {
     }
 
     #[test]
-    fn an_unterminated_block_is_visible_as_such() {
+    fn nothing_is_reported_until_the_block_closes() {
+        // A caller blocks on the reply, so a block that never closes must not
+        // produce a partial one.
         let mut demux = Demux::new();
 
-        assert!(!demux.in_block());
-        assert!(demux.line(b"%begin 1 2 1").is_none());
-        assert!(demux.in_block());
-        assert!(demux.line(b"partial").is_none());
-        assert!(demux.in_block());
+        assert_eq!(demux.line(b"%begin 1 2 1"), None);
+        assert_eq!(demux.line(b"partial"), None);
         assert!(demux.line(b"%end 1 2 1").is_some());
-        assert!(!demux.in_block());
     }
 }
