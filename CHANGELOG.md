@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Switch CI from `dtolnay/rust-toolchain` to
+  `actions-rust-lang/setup-rust-toolchain` (playbook v1.9)
+- Remove the `homepage` field from the manifest, redundant with `repository`
+  and denied as a warning by the new toolchain setup
+
 ## [0.7.0] - 2026-10-11
 
 ### Added
