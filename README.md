@@ -78,7 +78,17 @@ client, and killing a session. Two consequences are worth knowing:
 - while any control client is attached — this crate's, or another tool's —
   tmux resolves "the current client" to it for a caller that is not itself
   inside a tmux client. `current_client` and `current_client_name` report no
-  client in that case rather than naming it.
+  client in that case rather than naming it. If you need the calling client
+  and a control handle, ask for the client first, on a spawning handle, and
+  attach afterwards:
+
+    ```rust
+    let client = Tmux::spawning().current_client()?;
+    let tmux = Tmux::control().unwrap_or_else(|_| Tmux::spawning());
+    ```
+
+    This keeps your own connection out of the answer. It cannot keep out
+    another tool's.
 
 ## Caveats
 

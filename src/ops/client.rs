@@ -51,6 +51,15 @@ impl Tmux {
     /// empty session. That is a state to report, not a failure: see
     /// [`Self::most_recent_client_name`] for picking a client in that case.
     ///
+    /// # Control clients
+    ///
+    /// While any control client is attached to the server, tmux resolves "the
+    /// current client" to it, whichever handle asks. This returns `None` in
+    /// that case rather than describing the control client. To get the
+    /// caller's client alongside a [`Tmux::control`] handle, call this on a
+    /// spawning handle *before* attaching. That keeps this crate's own
+    /// connection out of the answer, but not one attached by another tool.
+    ///
     /// # Errors
     ///
     /// Returns an error if tmux fails or emits a malformed client record.
@@ -124,6 +133,9 @@ impl Tmux {
     ///
     /// This is the target other clients are addressed by; see
     /// [`Self::client_for_target`] and [`Self::display_message_to`].
+    ///
+    /// Attached control clients affect this as they do
+    /// [`Self::current_client`]; see its "Control clients" section.
     ///
     /// # Errors
     ///
