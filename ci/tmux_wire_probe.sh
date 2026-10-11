@@ -10,7 +10,7 @@
 # as a length-framed transport for pane contents — which is what a future
 # control-mode transport wants it for.
 #
-# Three checks, all fatal: load known bytes into a buffer and require the
+# Four checks, all fatal: load known bytes into a buffer and require the
 # readback and the advertised `#{buffer_size}` to match the input exactly, read
 # one pane both ways and require the two routes to agree, and set an option
 # over a control connection and require the argument to arrive unchanged.
@@ -182,6 +182,72 @@ if [ "$quoting_ok" = 1 ]; then
 else
   echo "--- control connection transcript ---"
   cat "$work/control"
+  status=1
+fi
+
+# Can a capture be length-framed on a control connection? The checks above
+# read buffers by forking a client; a control client writes command output
+# through its own path, which is the one that matters for moving captures onto
+# the connection. Capture into a buffer and read it back over the connection,
+# with the flags the crate captures with, then require the block body to be
+# exactly `#{buffer_size}` plus the one newline control mode adds, and the
+# payload to match a capture taken by forking a client.
+
+capture_flags=(-J -e -S - -E -)
+
+# A pane holding what an escaping sink would change — colour escapes, which
+# `-e` keeps as ESC bytes, and multi-byte UTF-8 — plus a line shaped like a
+# block terminator, which only the exact-triple match keeps inside the body.
+tmux -u -L "$socket" new-window -d -n framed \
+  "printf '\\033[31mred\\033[0m π %%end 1 2 3 BBB\\nframed-done\\n'; exec cat"
+
+pane_printed() {
+  tmux -u -L "$socket" capture-pane -p -t framed | grep -q framed-done
+}
+wait_for "the framing pane to print" pane_printed
+
+tmux -u -L "$socket" capture-pane -p "${capture_flags[@]}" -t framed \
+  >"$work/direct-full"
+
+printf '%s\n' \
+  "capture-pane -b ctlcap ${capture_flags[*]} -t framed" \
+  'show-buffer -b ctlcap' |
+  tmux -u -L "$socket" -C attach -f no-output,ignore-size \
+    >"$work/control-capture" 2>&1
+
+ctl_size=$(tmux -u -L "$socket" list-buffers -F '#{buffer_name} #{buffer_size}' |
+  awk '$1 == "ctlcap" { print $2 }')
+
+# Print the body of the second command's block, matching its terminator by the
+# exact `%begin` triple as the crate does. Exit 2 if tmux reported an error.
+LC_ALL=C awk '
+  open == "" && $1 == "%begin" && $4 == "1" { n++; open = $2 " " $3 " " $4; next }
+  open != "" && $0 == "%error " open { if (n == 2) exit 2; open = ""; next }
+  open != "" && $0 == "%end " open { if (n == 2) exit 0; open = ""; next }
+  open != "" && n == 2 { print }
+' "$work/control-capture" >"$work/ctl-body" || {
+  echo "FAIL  show-buffer failed on the control connection"
+  cat "$work/control-capture"
+  status=1
+}
+
+ctl_body=$(wc -c <"$work/ctl-body" | tr -d ' ')
+echo "buffer_size:   ${ctl_size:-missing} (control capture)"
+echo "block body:    $ctl_body bytes"
+
+if [ -n "$ctl_size" ] && [ "$ctl_body" -eq $((ctl_size + 1)) ]; then
+  echo "PASS  a control-mode show-buffer body is buffer_size + 1 bytes"
+else
+  echo "FAIL  a control-mode show-buffer body is not buffer_size + 1 bytes"
+  status=1
+fi
+
+if [ -n "$ctl_size" ] &&
+  head -c "$ctl_size" "$work/ctl-body" | cmp -s - "$work/direct-full"; then
+  echo "PASS  a buffered capture over control matches a forked capture"
+else
+  echo "FAIL  a buffered capture over control differs from a forked capture"
+  diff <(od -c "$work/direct-full") <(od -c "$work/ctl-body") || true
   status=1
 fi
 
