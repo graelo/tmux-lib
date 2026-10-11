@@ -6,32 +6,159 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-10-11
 
 ### Added
 
+- `Tmux::control` and `Tmux::control_on`, a second transport that keeps one
+  `tmux -C` client attached and sends every command down it, so a command
+  costs a round trip on an open pipe rather than a fork, an exec and a
+  connect. `Tmux::spawning` is unchanged and remains the right choice for a
+  program that runs a handful of commands and exits
+- `Tmux::disconnect`, releasing the attached client. The next command attaches
+  again; a spawning handle has nothing to release
+- `Error::ControlAttachFailed` and `Error::ControlDisconnected`
+- Every operation's integration test runs twice, once on each transport, so
+  that a control handle and a spawning one are known to answer alike rather
+  than assumed to
+- `ci/tmux_wire_probe.sh` checks that an argument survives tmux's command
+  lexer on a control connection, so the crate's quoting rule is answered on
+  every row of the version matrix rather than on the developer's tmux alone
+- `Error::UnsupportedArgument`, for an argument the transport in use cannot
+  carry. The control transport sends one command per line, so an argument
+  holding a newline is refused rather than truncated
+
+### Changed
+
+- **Breaking:** require tmux 3.4 or later. The compatibility matrix showed
+  tmux 3.2 escaping `show-buffer` output sent to a control client — each ESC
+  byte arrives as the four characters `\033` — so bytes read over the control
+  transport cannot be trusted there, nor checked against a length. 3.3 is
+  untested. With 3.2 gone, `Tmux::display_message_to` no longer has a version
+  requirement of its own
+- `capture_pane` on a control handle runs on the connection instead of forking
+  a client. It captures into a named paste buffer, reads the buffer's size,
+  and accepts the bytes only if they match it exactly, so a pane that prints a
+  line shaped like the reply terminator cannot cut its own capture short. The
+  buffer is always deleted, and a failure to delete it fails the call. Captures
+  from several threads now take turns on the connection
+- **Breaking:** `Tmux` no longer derives `PartialEq` and `Eq`. A handle may
+  now own a live connection, which has no sensible equality
+- **Breaking:** remove `error::check_process_success` and
+  `error::check_empty_process_output`. Both took a `std::process::Output`,
+  which no caller outside the crate can obtain from this API, and the control
+  transport has no process to hand them — it has a block of output and an
+  `%end`/`%error` terminator. Their checks are now methods on an internal
+  reply type that both transports produce
+
+### Fixed
+
+- Windows can be listed on tmux 3.8. It reports layouts in a new JSON format,
+  which the layout parser rejected, so `available_windows` failed outright.
+  `parse_window_layout` now reads both formats, and a floating pane is listed
+  by `Window::pane_ids` like any other. A control handle attaches with
+  `new-layouts`, without which tmux 3.8 sends it the older format and leaves
+  floating panes out; earlier versions ignore the flag
+- `current_client` and `current_client_name` report no client rather than
+  naming a control client. When the caller is not itself inside a tmux client,
+  tmux answers "who is calling" with whichever client it considers best, and
+  once any control client is attached — this crate's own, or one belonging to
+  another tool reading tmux — that is the one it picks. Forking a client does
+  not avoid it: the answer depends on what is attached to the server
+- `most_recent_client_name` skips control clients. They are listed like any
+  other client and are typically the most recently active, but they have no
+  status line to report to
+- `Tmux::command` reports a failing tmux command instead of handing back
+  whatever it left on stdout
+- `show_option` and `show_options` report a failing tmux command instead of
+  answering `None` and an empty map
+- An operation expected to be silent, such as `select_pane`, now also reports
+  a command that exited non-zero without printing anything. The check it
+  replaced looked only at the two output streams
+
+## [0.6.0] - 2026-10-11
+
+### Changed
+
+- **Breaking:** every tmux operation is now a synchronous method on a `Tmux`
+  handle (`Tmux::spawning()`, or `Tmux::spawning_on(Server::socket_name(..))`
+  for a non-default server) instead of an `async` free function. The handle is
+  `Send + Sync + Clone`; async callers bridge with their runtime's blocking
+  helper. The `smol` dependency is gone, taking the transitive runtime
+  dependencies from 42 crates to 12
+- **Breaking:** remove legacy quote-delimited `FromStr` input for panes,
+  sessions, windows, and clients; framed records are decoded by the crate
+  itself and are no longer part of the public API. `Tmux::current_client` and
+  `Tmux::client_for_target` replace hand-built format strings fed to
+  `Client::from_str`
+- **Breaking:** `display_message` and `switch_client` return `Result` instead
+  of panicking on failure, and the `display_message` re-export at the crate
+  root is now `Tmux::display_message`
+- **Breaking:** `Error` is `#[non_exhaustive]`, and `Error::ParseError`
+  carries a plain message rather than a `nom` error, which the record decoders
+  no longer produce
+- **Breaking:** `Tmux::current_client` returns `Option<Client>`. Outside a
+  tmux client — a scheduler, a cron job, a plain shell — tmux answers
+  `display-message` with an empty session, and the framed decoder rejected it
+  as malformed. A caller running outside tmux could no longer describe the
+  client, which is a state to report rather than a failure
+- `Client` derives `Default`, so "no client" has a value to record
+- `Pane::capture` becomes `Tmux::capture_pane`, and `Pane`, `Window`,
+  `Session` and `Client` no longer perform I/O
+- Make `README.md` the canonical crate overview and remove its
+  `cargo-sync-readme` markers, and document the API there
+- Reduce crate-level Rust documentation to a link to the project README
+- No `make` target passes `--locked`. This crate is a library, its
+  `Cargo.lock` is gitignored, and the versions that matter are the ones a
+  consumer's own lock file picks
+
+### Fixed
+
+- Pass `-u` to every tmux invocation. Without it, a tmux client started in an
+  environment with no locale is treated as non-UTF-8, and tmux replaces every
+  non-ASCII byte in its output with `_` — silently mangling pane titles and
+  paths under cron, launchd, or a bare systemd unit
+- `show_option` returned `"status off"` where it meant `"off"`; it asked tmux
+  to print the option name alongside the value
+- `show_option` queries the same scope as `show_options` — the global table
+  with `global`, the session table without it. It passed `-w` unconditionally,
+  so it asked for window options while `show_options` asked for session ones
+- Use byte-length-prefixed tmux records when reading panes, sessions, windows,
+  and client session names, preserving arbitrary UTF-8 values and newlines
+- Normalize visually escaped tmux 3.4–3.5 command output before parsing framed
+  records, preserving arbitrary UTF-8 values and backslashes across tmux
+  versions
+
+### Added
+
+- `Server`, selecting the default tmux server, a socket name (`tmux -L`) or a
+  socket path (`tmux -S`). Integration tests now run each case on their own
+  private server instead of sharing the developer's
+- `Tmux::current_client_name`, `Tmux::most_recent_client_name` and
+  `Tmux::display_message_to`, so a caller outside tmux can pick an attached
+  client and report to it without spawning tmux itself
+- `src/wire/`, the single module that knows the framed record protocol. Format
+  and intent strings are derived from a declared field list per record type
+  rather than hand-escaped in four places
+- `src/transport/`, the single site that starts a tmux process, so every
+  invocation shares one argument prefix
+- `tests/architecture.rs` enforces both of the above by walking `src/`
+- A tmux version axis (3.2, 3.4, 3.5, 3.6, 3.7c, built from source) in the
+  compatibility matrix, with `ci/tmux_wire_probe.sh` checking that the buffer
+  round-trip preserves bytes on each
 - A `Makefile` defines canonical local verification tasks, with `make check`
   as the pre-push gate and `make check-all` as the pre-PR gate
 - `rumdl.toml` applies consistent Markdown linting and formatting rules
 - `AGENTS.md` documents the project architecture, verification, and release
   conventions for coding agents
 
-### Fixed
+### Documentation
 
-- Use byte-length-prefixed tmux records when reading panes, sessions, windows,
-  and client session names, preserving arbitrary UTF-8 values and newlines
-- Normalize visually escaped tmux 3.2–3.5 command output before parsing framed
-  records, preserving arbitrary UTF-8 values and backslashes across tmux
-  versions
-
-### Changed
-
-- **Breaking:** remove legacy quote-delimited `FromStr` input for panes,
-  sessions, windows, and clients; these parsers now accept only byte-length-
-  prefixed framed tmux records
-- Make `README.md` the canonical crate overview and remove its
-  `cargo-sync-readme` markers
-- Reduce crate-level Rust documentation to a link to the project README
+- `Tmux::display_message_to` requires tmux 3.3. The compatibility matrix
+  showed 3.2 rejecting every call: it declares `display-message -c` without an
+  argument, so the client name is parsed as a second positional argument and
+  tmux answers with its usage string. Nothing on 3.2 targets a client, so this
+  is documented rather than worked around
 
 ## [0.5.0] - 2026-04-18
 

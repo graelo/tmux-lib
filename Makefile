@@ -6,7 +6,11 @@
 #   make fix         # auto-format and apply clippy fixes
 #
 # The check targets intentionally mirror .github/workflows/ci-essentials.yml so
-# a green local run predicts a green CI run. They assume their external tools
+# a green local run predicts a green CI run.
+#
+# No target passes --locked: this crate is a library, Cargo.lock is gitignored,
+# and the versions that matter are the ones a consumer's own lock file picks.
+# They assume their external tools
 # (cargo-nextest, cargo-deny, cargo-pants, convco, poutine, zizmor, rumdl, and
 # cargo-llvm-cov) are already installed locally.
 
@@ -23,7 +27,7 @@ fmt:  ## rustfmt --check (no changes)
 	cargo fmt --all -- --check
 
 lint:  ## clippy with warnings denied
-	cargo clippy --locked --all-targets -- -D warnings
+	cargo clippy --all-targets -- -D warnings
 
 test:  ## full test suite (build + nextest + doc tests)
 	./ci/test_full.sh
@@ -31,7 +35,7 @@ test:  ## full test suite (build + nextest + doc tests)
 check: fmt lint test  ## pre-push gate: fmt + lint + test
 
 audit:  ## cargo-deny & cargo-pants: advisories, licenses, bans, sources
-	cargo deny --locked check
+	cargo deny check
 	cargo pants
 
 commits:  ## verify commit messages follow Conventional Commits
@@ -48,7 +52,7 @@ check-all: check audit commits ci-security md  ## pre-PR gate: everything
 
 fix:  ## auto-fix: rustfmt + clippy --fix
 	cargo fmt --all
-	cargo clippy --locked --all-targets --fix --allow-dirty --allow-staged -- -D warnings
+	cargo clippy --all-targets --fix --allow-dirty --allow-staged -- -D warnings
 
 coverage:  ## HTML coverage report at target/llvm-cov/html/index.html
-	cargo llvm-cov --locked --html
+	cargo llvm-cov --html

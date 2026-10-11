@@ -88,7 +88,7 @@ mod tests {
             Err(Error::ParseError {
                 desc: "WindowId",
                 intent: "##{window_id}",
-                err: _
+                message: _
             })
         ));
     }

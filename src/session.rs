@@ -3,39 +3,19 @@
 //! The main use cases are running Tmux commands & parsing Tmux session
 //! information.
 
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
-use nom::{Parser, character::complete::char, combinator::all_consuming};
 use serde::{Deserialize, Serialize};
-use smol::process::Command;
 
 use crate::{
-    Result,
-    error::{Error, check_process_success, map_add_intent, map_byte_parse_error},
-    pane::Pane,
-    pane_id::{PaneId, parse::pane_id},
-    parse::{ByteCursor, ByteParseError, FIELD_SEPARATOR, RECORD_SEPARATOR, normalize_tmux_output},
-    session_id::{SessionId, parse::session_id},
-    window::Window,
-    window_id::{WindowId, parse::window_id},
+    session_id::SessionId,
+    wire::{ByteParseError, RecordReader},
 };
-
-/// Format used by [`available_sessions`] for one session per newline-terminated record.
-const SESSION_LIST_FORMAT: &str = "#{session_id}\x1f#{n:session_name}\x1f#{s|\\\\|\\\\\\\\|:session_name}\x1f#{n:session_path}\x1f#{s|\\\\|\\\\\\\\|:session_path}";
-const SESSION_LIST_INTENT: &str = "#{session_id}\\x1f#{n:session_name}\\x1f#{s|\\\\|\\\\\\\\|:session_name}\\x1f#{n:session_path}\\x1f#{s|\\\\|\\\\\\\\|:session_path}\\n";
 
 /// A Tmux session.
 ///
-/// ```
-/// use std::str::FromStr;
-/// use tmux_lib::session::Session;
-///
-/// let line = "$1\x1f7\x1fpytorch\x1f24\x1f/Users/graelo/ml/pytorch\n";
-/// let session = Session::from_str(line).unwrap();
-///
-/// assert_eq!(session.id.as_str(), "$1");
-/// assert_eq!(session.name, "pytorch");
-/// ```
+/// Values are decoded from a framed `list-sessions` record; see
+/// [`crate::Tmux::available_sessions`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     /// Session identifier, e.g. `$3`.
@@ -46,83 +26,18 @@ pub struct Session {
     pub dirpath: PathBuf,
 }
 
-impl FromStr for Session {
-    type Err = Error;
-
-    /// Parse a string containing tmux session status into a new `Session`.
-    ///
-    /// This returns a `Result<Session, Error>` as this call can obviously
-    /// fail if provided an invalid format.
-    ///
-    /// The tmux status is a byte-framed, newline-terminated record:
-    ///
-    /// ```text
-    /// #{session_id}\x1f#{n:session_name}\x1f#{session_name}\x1f#{n:session_path}\x1f#{session_path}\n
-    /// ```
-    ///
-    /// `#{n:...}` is a byte length, and `\x1f` is Unit Separator. This parser
-    /// accepts only this framed format. For example, tmux may emit:
-    ///
-    /// ```text
-    /// $1\x1f7\x1fpytorch\x1f24\x1f/Users/graelo/ml/pytorch\n
-    /// $2\x1f4\x1frust\x1f18\x1f/Users/graelo/rust\n
-    /// $3\x1f10\x1fserver: $~\x1f19\x1f/Users/graelo/swift\n
-    /// $4\x1f12\x1ftmux-hacking\x1f18\x1f/Users/graelo/tmux\n
-    /// ```
-    ///
-    /// The CLI query doubles literal backslashes in data fields so tmux 3.2
-    /// through 3.5 can be normalized before parsing:
-    ///
-    /// ```text
-    /// tmux list-sessions -F "#{session_id}\x1f#{n:session_name}\x1f#{s|\\|\\\\|:session_name}\x1f#{n:session_path}\x1f#{s|\\|\\\\|:session_path}"
-    /// ```
-    ///
-    /// For definitions, look at `Session` type and the tmux man page for
-    /// definitions.
-    fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
-        parse::framed_session(input.as_bytes())
-            .map_err(|e| map_byte_parse_error("Session", SESSION_LIST_INTENT, e))
-    }
-}
-
-mod parse {
-    use super::*;
-
-    pub(super) fn framed_session(input: &[u8]) -> std::result::Result<Session, ByteParseError> {
-        let mut cursor = ByteCursor::new(input);
-        let session = framed_session_record(&mut cursor)?;
-        if !cursor.is_at_end() {
-            return Err(ByteParseError::new(
-                "unexpected trailing bytes after session record",
-            ));
-        }
-        Ok(session)
-    }
-
-    pub(super) fn framed_sessions(input: &[u8]) -> Result<Vec<Session>> {
-        let mut cursor = ByteCursor::new(input);
-        let mut sessions = Vec::new();
-        while !cursor.is_at_end() {
-            sessions.push(
-                framed_session_record(&mut cursor)
-                    .map_err(|e| map_byte_parse_error("Session", SESSION_LIST_INTENT, e))?,
-            );
-        }
-        Ok(sessions)
-    }
-
-    fn framed_session_record(
-        cursor: &mut ByteCursor<'_>,
+impl Session {
+    /// Build a `Session` from one framed record, reading the fields declared
+    /// in [`SESSION_FIELDS`].
+    pub(crate) fn decode(
+        reader: &mut RecordReader<'_, '_>,
     ) -> std::result::Result<Session, ByteParseError> {
-        let id = cursor
-            .take_token_str("session ID")?
+        let id = reader
+            .token("session ID")?
             .parse()
             .map_err(|_| ByteParseError::new("invalid session ID"))?;
-        let name = cursor.take_length_prefixed_string(FIELD_SEPARATOR, "session name")?;
-        if name.is_empty() {
-            return Err(ByteParseError::new("session name is empty"));
-        }
-        let dirpath = cursor.take_length_prefixed_string(RECORD_SEPARATOR, "session path")?;
+        let name = reader.required_data("session name")?;
+        let dirpath = reader.data("session path")?;
 
         Ok(Session {
             id,
@@ -132,76 +47,23 @@ mod parse {
     }
 }
 
-// ------------------------------
-// Ops
-// ------------------------------
-
-/// Return a list of all `Session` from the current tmux session.
-pub async fn available_sessions() -> Result<Vec<Session>> {
-    let args = vec!["list-sessions", "-F", SESSION_LIST_FORMAT];
-
-    let output = Command::new("tmux").args(&args).output().await?;
-    check_process_success(&output, "list-sessions")?;
-    let stdout = normalize_tmux_output(&output.stdout)
-        .map_err(|e| map_byte_parse_error("Session", SESSION_LIST_INTENT, e))?;
-    parse::framed_sessions(&stdout)
-}
-
-/// Create a Tmux session (and thus a window & pane).
-///
-/// The new session attributes:
-///
-/// - the session name is taken from the passed `session`
-/// - the working directory is taken from the pane's working directory.
-///
-pub async fn new_session(
-    session: &Session,
-    window: &Window,
-    pane: &Pane,
-    pane_command: Option<&str>,
-) -> Result<(SessionId, WindowId, PaneId)> {
-    let mut args = vec![
-        "new-session",
-        "-d",
-        "-c",
-        pane.dirpath.to_str().unwrap(),
-        "-s",
-        &session.name,
-        "-n",
-        &window.name,
-        "-P",
-        "-F",
-        "#{session_id}:#{window_id}:#{pane_id}",
-    ];
-    if let Some(pane_command) = pane_command {
-        args.push(pane_command);
-    }
-
-    let output = Command::new("tmux").args(&args).output().await?;
-
-    // Check exit status before parsing to avoid confusing parse errors
-    // when tmux fails and returns empty/garbage stdout.
-    check_process_success(&output, "new-session")?;
-
-    let buffer = String::from_utf8(output.stdout)?;
-    let buffer = buffer.trim_end();
-
-    let desc = "new-session";
-    let intent = "##{session_id}:##{window_id}:##{pane_id}";
-    let (_, (new_session_id, _, new_window_id, _, new_pane_id)) =
-        all_consuming((session_id, char(':'), window_id, char(':'), pane_id))
-            .parse(buffer)
-            .map_err(|e| map_add_intent(desc, intent, e))?;
-
-    Ok((new_session_id, new_window_id, new_pane_id))
-}
-
 #[cfg(test)]
 mod tests {
     use super::Session;
     use super::SessionId;
-    use super::parse;
-    use super::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+    use crate::wire::formats::{SESSION_FIELDS, SESSION_INTENT};
+    use crate::wire::framing::{FIELD_SEPARATOR, RECORD_SEPARATOR};
+    use crate::wire::{decode_all, decode_one};
+
+    fn parse_all(input: &[u8]) -> crate::Result<Vec<Session>> {
+        decode_all(input, SESSION_FIELDS, Session::decode)
+            .map_err(|e| crate::error::map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))
+    }
+
+    fn parse_one(input: &str) -> crate::Result<Session> {
+        decode_one(input.as_bytes(), SESSION_FIELDS, Session::decode)
+            .map_err(|e| crate::error::map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))
+    }
     use crate::Result;
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -230,8 +92,7 @@ mod tests {
             ))
             .unwrap(),
         ];
-        let sessions: Result<Vec<Session>> =
-            output.iter().map(|line| Session::from_str(line)).collect();
+        let sessions: Result<Vec<Session>> = output.iter().map(|line| parse_one(line)).collect();
         let sessions = sessions.expect("Could not parse tmux sessions");
 
         let expected = vec![
@@ -268,7 +129,7 @@ mod tests {
             b"/home/user/projects",
         ))
         .unwrap();
-        let session = Session::from_str(&input).expect("Should parse session with large id");
+        let session = parse_one(&input).expect("Should parse session with large id");
 
         assert_eq!(session.id, SessionId::from_str("$999").unwrap());
         assert_eq!(session.name, "large-id-session");
@@ -283,7 +144,7 @@ mod tests {
             b"/Users/user/My Projects/rust",
         ))
         .unwrap();
-        let session = Session::from_str(&input).expect("Should parse session with spaces in path");
+        let session = parse_one(&input).expect("Should parse session with spaces in path");
 
         assert_eq!(session.name, "dev");
         assert_eq!(
@@ -300,7 +161,7 @@ mod tests {
             b"/home/user/code",
         ))
         .unwrap();
-        let session = Session::from_str(&input).expect("Should parse session with unicode name");
+        let session = parse_one(&input).expect("Should parse session with unicode name");
 
         assert_eq!(session.name, "项目-日本語");
     }
@@ -313,14 +174,14 @@ mod tests {
             b"/path/to/dir",
         ))
         .unwrap();
-        let result = Session::from_str(&input);
+        let result = parse_one(&input);
 
         assert!(result.is_err());
     }
 
     #[test]
     fn parse_session_rejects_legacy_format() {
-        let result = Session::from_str("$1:'session-name':/path/to/dir");
+        let result = parse_one("$1:'session-name':/path/to/dir");
 
         assert!(result.is_err());
     }
@@ -328,7 +189,7 @@ mod tests {
     #[test]
     fn parse_session_fails_on_empty_name() {
         let input = String::from_utf8(framed_session_record(b"$1", b"", b"/path/to/dir")).unwrap();
-        let result = Session::from_str(&input);
+        let result = parse_one(&input);
 
         assert!(result.is_err());
     }
@@ -336,7 +197,7 @@ mod tests {
     #[test]
     fn parse_session_fails_on_malformed_id() {
         let input = String::from_utf8(framed_session_record(b"@1", b"session", b"/path")).unwrap();
-        let result = Session::from_str(&input); // @ is window prefix, not session.
+        let result = parse_one(&input); // @ is window prefix, not session.
 
         assert!(result.is_err());
     }
@@ -350,7 +211,7 @@ mod tests {
             b"/path/with:colon/here",
         ))
         .unwrap();
-        let session = Session::from_str(&input).expect("Should parse session with colon in path");
+        let session = parse_one(&input).expect("Should parse session with colon in path");
 
         assert_eq!(session.dirpath, PathBuf::from("/path/with:colon/here"));
     }
@@ -374,7 +235,7 @@ mod tests {
     fn parse_framed_session_preserves_arbitrary_utf8_data() {
         let name = "π's: \\\x1f# $;";
         let path = "/tmp/a:b\\c\nnext";
-        let session = Session::from_str(
+        let session = parse_one(
             std::str::from_utf8(&framed_session_record(
                 b"$7",
                 name.as_bytes(),
@@ -398,10 +259,10 @@ mod tests {
         let invalid_utf8 = framed_session_record(b"$7", &[0xff], b"/tmp");
 
         for record in [missing_terminator, trailing_bytes, invalid_utf8] {
-            assert!(parse::framed_sessions(&record).is_err());
+            assert!(parse_all(&record).is_err());
         }
 
         let invalid_length = b"$7\x1fnot-a-number\x1fname\x1f4\x1f/tmp\n";
-        assert!(parse::framed_sessions(invalid_length).is_err());
+        assert!(parse_all(invalid_length).is_err());
     }
 }
