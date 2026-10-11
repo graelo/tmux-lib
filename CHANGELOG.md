@@ -12,6 +12,8 @@ and this project adheres to
 
 - Switch CI from `dtolnay/rust-toolchain` to
   `actions-rust-lang/setup-rust-toolchain` (playbook v1.9)
+- Remove the `homepage` field from the manifest, redundant with `repository`
+  and denied as a warning by the new toolchain setup
 
 ## [0.7.0] - 2026-10-11
 

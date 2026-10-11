@@ -7,7 +7,6 @@ description = "Tmux helper functions."
 readme = "README.md"
 
 documentation = "https://docs.rs/tmux-lib"
-homepage = "https://github.com/graelo/tmux-lib"
 repository = "https://github.com/graelo/tmux-lib"
 license = "MIT OR Apache-2.0"
 
