@@ -36,6 +36,12 @@ and this project adheres to
   transport cannot be trusted there, nor checked against a length. 3.3 is
   untested. With 3.2 gone, `Tmux::display_message_to` no longer has a version
   requirement of its own
+- `capture_pane` on a control handle runs on the connection instead of forking
+  a client. It captures into a named paste buffer, reads the buffer's size,
+  and accepts the bytes only if they match it exactly, so a pane that prints a
+  line shaped like the reply terminator cannot cut its own capture short. The
+  buffer is always deleted, and a failure to delete it fails the call. Captures
+  from several threads now take turns on the connection
 - **Breaking:** `Tmux` no longer derives `PartialEq` and `Eq`. A handle may
   now own a live connection, which has no sensible equality
 - **Breaking:** remove `error::check_process_success` and

@@ -162,6 +162,11 @@ impl Tmux {
     pub(crate) fn run_spawned(&self, argv: &[&str]) -> Result<Reply> {
         self.transport.run_spawned(argv)
     }
+
+    /// Whether this handle sends commands down an attached control client.
+    pub(crate) fn is_control(&self) -> bool {
+        self.transport.is_control()
+    }
 }
 
 #[cfg(test)]

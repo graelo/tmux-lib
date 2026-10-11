@@ -76,6 +76,11 @@ impl Transport {
         }
     }
 
+    /// Whether commands travel an attached control client.
+    pub(crate) fn is_control(&self) -> bool {
+        matches!(self, Transport::Control(_))
+    }
+
     pub(crate) fn server(&self) -> &Server {
         match self {
             Transport::Spawning(spawning) => spawning.server(),

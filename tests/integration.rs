@@ -839,4 +839,80 @@ mod control_routing_tests {
         assert!(server.control().current_client().unwrap().is_none());
         assert!(server.tmux().current_client().unwrap().is_none());
     }
+
+    /// The capture buffers this crate's control captures left on `server`.
+    fn leftover_capture_buffers(server: &TestServer) -> Vec<String> {
+        let output = server.raw(&["list-buffers", "-F", "#{buffer_name}"]);
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .filter(|name| name.starts_with("tmux-lib-"))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn a_control_capture_matches_a_forked_one_byte_for_byte() {
+        require_tmux!();
+        let server = TestServer::start("ctlcap");
+
+        // Colour escapes, a multi-byte character, and a line shaped like a
+        // block terminator: everything a control connection could mangle or
+        // mistake for the end of the reply. `exec cat` then keeps the pane
+        // alive and idle, so both captures see the same screen.
+        let output = server.raw(&[
+            "new-window",
+            "-d",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            r"printf '\033[31mred\033[0m π %%end 1 2 3 BBB\nframed-done\n'; exec cat",
+        ]);
+        let pane_id = tmux_lib::pane_id::PaneId::from_str(
+            String::from_utf8(output.stdout).unwrap().trim_end(),
+        )
+        .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let forked = loop {
+            let captured = server.tmux().capture_pane(&pane_id).unwrap();
+            if String::from_utf8_lossy(&captured).contains("framed-done") {
+                break captured;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the pane never finished printing"
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        };
+
+        // Otherwise the comparison below proves nothing.
+        let text = String::from_utf8_lossy(&forked);
+        assert!(text.contains("\x1b[31mred"), "no escape in {text:?}");
+        assert!(
+            text.contains("π %end 1 2 3 BBB"),
+            "no terminator in {text:?}"
+        );
+
+        let control = server.control();
+        assert_eq!(control.capture_pane(&pane_id).unwrap(), forked);
+        assert!(leftover_capture_buffers(&server).is_empty());
+    }
+
+    #[test]
+    fn a_failed_control_capture_leaves_no_buffer_behind() {
+        require_tmux!();
+        let server = TestServer::start("ctlcapfail");
+        let control = server.control();
+
+        let missing = tmux_lib::pane_id::PaneId::from_str("%99999").unwrap();
+        assert!(control.capture_pane(&missing).is_err());
+
+        // The connection is still usable, and a capture that worked cleaned
+        // up after itself too.
+        let pane_id = control.available_panes().unwrap()[0].id.clone();
+        control.capture_pane(&pane_id).unwrap();
+
+        assert!(leftover_capture_buffers(&server).is_empty());
+    }
 }

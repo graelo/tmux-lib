@@ -64,9 +64,10 @@ let tmux = Tmux::control().unwrap_or_else(|_| Tmux::spawning());
 ```
 
 A control handle is not a different API. Every operation exists on both, and
-the ones a control connection cannot carry fork a client themselves: captures,
-anything creating a pane, window or session, anything about the calling
-client, and killing a session. Two consequences are worth knowing:
+the ones a control connection cannot carry fork a client themselves: anything
+creating a pane, window or session, anything about the calling client, and
+killing a session. Captures do travel the connection, so captures from several
+threads take turns on it. Two consequences are worth knowing:
 
 - an attached control client is visible. It bumps `#{session_attached}` and
   fires the `client-attached` and `client-detached` hooks. Call
