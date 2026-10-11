@@ -63,8 +63,6 @@ impl Tmux {
     /// # Errors
     ///
     /// Returns an error if tmux fails or emits a malformed client record.
-    /// Returns the attributes of the client issuing this command, or `None`
-    /// when the caller is not running inside one.
     pub fn current_client(&self) -> Result<Option<Client>> {
         if self.current_client_is_control()? {
             return Ok(None);
