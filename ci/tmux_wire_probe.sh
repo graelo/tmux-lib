@@ -10,10 +10,12 @@
 # as a length-framed transport for pane contents — which is what a future
 # control-mode transport wants it for.
 #
-# Four checks, all fatal: load known bytes into a buffer and require the
+# Five checks, all fatal: load known bytes into a buffer and require the
 # readback and the advertised `#{buffer_size}` to match the input exactly, read
-# one pane both ways and require the two routes to agree, and set an option
-# over a control connection and require the argument to arrive unchanged.
+# one pane both ways and require the two routes to agree, set an option over a
+# control connection and require the argument to arrive unchanged, length-frame
+# a capture over a control connection, and require a control connection to
+# report the same window layouts as a forked client.
 #
 # Every released tmux answers this identically forever, so the rows in the
 # matrix are settled; the point is that a version added later answers it
@@ -27,6 +29,8 @@ if ! command -v tmux >/dev/null; then
 fi
 
 socket="wire-probe-$$"
+# The flags the crate attaches its control client with.
+attach_flags=no-output,ignore-size,new-layouts
 work=$(mktemp -d)
 # `kill-server` leaves the socket file behind, so remove it too — this script
 # is meant to be runnable on a developer's machine, not only on a runner that
@@ -158,7 +162,7 @@ values=(
 
 for i in "${!names[@]}"; do
   printf 'set-option -g @ctrl_%s %s\n' "${names[i]}" "$(sq "${values[i]}")"
-done | tmux -u -L "$socket" -C attach -f no-output,ignore-size >"$work/control" 2>&1
+done | tmux -u -L "$socket" -C attach -f "$attach_flags" >"$work/control" 2>&1
 
 for i in "${!names[@]}"; do
   tmux -u -L "$socket" set-option -g "@spawn_${names[i]}" "${values[i]}"
@@ -212,7 +216,7 @@ tmux -u -L "$socket" capture-pane -p "${capture_flags[@]}" -t framed \
 printf '%s\n' \
   "capture-pane -b ctlcap ${capture_flags[*]} -t framed" \
   'show-buffer -b ctlcap' |
-  tmux -u -L "$socket" -C attach -f no-output,ignore-size \
+  tmux -u -L "$socket" -C attach -f "$attach_flags" \
     >"$work/control-capture" 2>&1
 
 ctl_size=$(tmux -u -L "$socket" list-buffers -F '#{buffer_name} #{buffer_size}' |
@@ -248,6 +252,47 @@ if [ -n "$ctl_size" ] &&
 else
   echo "FAIL  a buffered capture over control differs from a forked capture"
   diff <(od -c "$work/direct-full") <(od -c "$work/ctl-body") || true
+  status=1
+fi
+
+# Does a control connection report the same layouts as a forked client? tmux
+# 3.8 reports a new layout format, but to a control client only when it
+# attaches with `new-layouts`; without it, the control client gets the older
+# format, which leaves floating panes out. Earlier versions must accept the
+# flag and carry on sending the one format they have.
+
+tmux -u -L "$socket" new-window -d -n layout
+tmux -u -L "$socket" split-window -d -h -t layout
+tmux -u -L "$socket" split-window -d -v -t layout
+
+layout_format='#{window_id} #{window_layout}'
+tmux -u -L "$socket" list-windows -F "$layout_format" >"$work/layouts-forked"
+
+printf 'list-windows -F %s\n' "$(sq "$layout_format")" |
+  tmux -u -L "$socket" -C attach -f "$attach_flags" \
+    >"$work/control-layouts" 2>&1
+
+# The body of the first command's block, as above.
+LC_ALL=C awk '
+  open == "" && $1 == "%begin" && $4 == "1" { n++; open = $2 " " $3 " " $4; next }
+  open != "" && $0 == "%error " open { exit 2 }
+  open != "" && $0 == "%end " open { exit 0 }
+  open != "" { print }
+' "$work/control-layouts" >"$work/layouts-control" || {
+  echo "FAIL  list-windows failed on the control connection"
+  cat "$work/control-layouts"
+  status=1
+}
+
+if [ -s "$work/layouts-forked" ] &&
+  cmp -s "$work/layouts-forked" "$work/layouts-control"; then
+  echo "PASS  a control connection reports the same layouts as a forked client"
+else
+  echo "FAIL  a control connection reports different layouts"
+  echo "--- forked ---"
+  cat "$work/layouts-forked"
+  echo "--- control ---"
+  cat "$work/layouts-control"
   status=1
 fi
 

@@ -170,7 +170,10 @@ impl Live {
             // `no-output` stops the flood: an attached control client is sent
             // every byte of every pane otherwise. `ignore-size` keeps our
             // client, which reports no size, from resizing the user's windows.
-            .args(["-C", "attach", "-f", "no-output,ignore-size"])
+            // `new-layouts` makes tmux 3.8 report layouts in the format every
+            // other client gets, rather than an older one that leaves floating
+            // panes out; earlier versions ignore a flag they do not know.
+            .args(["-C", "attach", "-f", "no-output,ignore-size,new-layouts"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

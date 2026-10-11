@@ -915,4 +915,24 @@ mod control_routing_tests {
 
         assert!(leftover_capture_buffers(&server).is_empty());
     }
+
+    #[test]
+    fn a_control_handle_reports_the_same_layouts_as_a_spawning_one() {
+        require_tmux!();
+        let server = TestServer::start("ctllayout");
+        server.raw(&["split-window", "-d", "-h"]);
+        server.raw(&["split-window", "-d", "-v"]);
+
+        // tmux 3.8 sends a control client an older layout format, one that
+        // leaves floating panes out, unless it attached asking for the new one.
+        let layouts = |tmux: &Tmux| -> Vec<String> {
+            tmux.available_windows()
+                .unwrap()
+                .into_iter()
+                .map(|window| window.layout)
+                .collect()
+        };
+
+        assert_eq!(layouts(&server.control()), layouts(server.tmux()));
+    }
 }

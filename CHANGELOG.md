@@ -56,7 +56,9 @@ and this project adheres to
 - Windows can be listed on tmux 3.8. It reports layouts in a new JSON format,
   which the layout parser rejected, so `available_windows` failed outright.
   `parse_window_layout` now reads both formats, and a floating pane is listed
-  by `Window::pane_ids` like any other
+  by `Window::pane_ids` like any other. A control handle attaches with
+  `new-layouts`, without which tmux 3.8 sends it the older format and leaves
+  floating panes out; earlier versions ignore the flag
 - `current_client` and `current_client_name` report no client rather than
   naming a control client. When the caller is not itself inside a tmux client,
   tmux answers "who is calling" with whichever client it considers best, and
