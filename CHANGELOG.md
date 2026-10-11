@@ -30,6 +30,12 @@ and this project adheres to
 
 ### Changed
 
+- **Breaking:** require tmux 3.4 or later. The compatibility matrix showed
+  tmux 3.2 escaping `show-buffer` output sent to a control client — each ESC
+  byte arrives as the four characters `\033` — so bytes read over the control
+  transport cannot be trusted there, nor checked against a length. 3.3 is
+  untested. With 3.2 gone, `Tmux::display_message_to` no longer has a version
+  requirement of its own
 - **Breaking:** `Tmux` no longer derives `PartialEq` and `Eq`. A handle may
   now own a live connection, which has no sensible equality
 - **Breaking:** remove `error::check_process_success` and

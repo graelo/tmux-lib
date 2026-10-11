@@ -80,11 +80,10 @@ jobs:
       - name: Test
         run: ./ci/test_full.sh
 
-  # The README claims tmux 3.2 and later. Runner images ship one tmux, and no
+  # The README claims tmux 3.4 and later. Runner images ship one tmux, and no
   # PPA carries old ones, so the claim is only tested by building each version
-  # from source. 3.4 and 3.5 are the rows that matter beyond the claim: they
-  # are the versions that pass command output through `utf8_stravisx()`, which
-  # is what `ci/tmux_wire_probe.sh` measures.
+  # from source. 3.4 and 3.5 matter most: they pass command output through
+  # `utf8_stravisx()`, which is what `ci/tmux_wire_probe.sh` measures.
   test-tmux-versions:
     runs-on: ubuntu-latest
     permissions:
@@ -96,8 +95,6 @@ jobs:
       fail-fast: false
       matrix:
         tmux:
-          - version: '3.2'
-            sha256: 664d345338c11cbe429d7ff939b92a5191e231a7c1ef42f381cebacb1e08a399
           - version: '3.4'
             sha256: 551ab8dea0bf505c0ad6b7bb35ef567cdde0ccb84357df142c254f35a23e19aa
           - version: '3.5'
