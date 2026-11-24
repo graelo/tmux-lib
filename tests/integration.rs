@@ -488,22 +488,35 @@ mod pane_tests {
         let dir = TestDir(path);
 
         on_each_transport("pane-cwd", |server, tmux| {
-            assert!(
-                server
-                    .raw(&[
-                        "new-window",
-                        "-d",
-                        "-c",
-                        dir.0.to_str().unwrap(),
-                        "exec cat"
-                    ])
-                    .status
-                    .success()
-            );
+            let output = server.raw(&[
+                "new-window",
+                "-d",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-c",
+                dir.0.to_str().unwrap(),
+                "exec cat",
+            ]);
+            assert!(output.status.success());
+            let id = String::from_utf8(output.stdout).unwrap();
+            let id = id.trim_end();
+
+            // tmux may report no working directory before the process starts.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let output =
+                    server.raw(&["display-message", "-p", "-t", id, "#{pane_current_command}"]);
+                if output.stdout == b"cat\n" {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "cat never started in pane {id}");
+                std::thread::sleep(Duration::from_millis(25));
+            }
 
             let panes = tmux.available_panes().unwrap();
-            assert_eq!(panes.len(), 2);
-            assert!(panes.iter().any(|pane| pane.dirpath == dir.0), "{panes:?}");
+            let pane = panes.iter().find(|pane| pane.id.as_str() == id).unwrap();
+            assert_eq!(pane.dirpath, dir.0);
         });
     }
 
