@@ -656,22 +656,25 @@ mod control_tests {
         let server = TestServer::start("ctlquote");
         let control = server.control();
 
-        let value = r#"it's "two words" \ and ; a #{format}"#;
-        control
-            .command(&["set-option", "-g", "@probe", value])
-            .unwrap();
+        for value in [
+            r#"it's "two words" \ and ; a #{format}"#,
+            r"ends with \",
+            "$HOME # π café",
+        ] {
+            control
+                .command(&["set-option", "-g", "@probe", value])
+                .unwrap();
 
-        // Read back over the spawning transport, where the argument never met
-        // the control-mode lexer, so a difference can only have come from the
-        // write.
-        assert_eq!(
-            server
-                .tmux()
-                .show_option("@probe", true)
-                .unwrap()
-                .as_deref(),
-            Some(value)
-        );
+            // A spawned client reads back exactly what tmux stored.
+            assert_eq!(
+                server
+                    .tmux()
+                    .show_option("@probe", true)
+                    .unwrap()
+                    .as_deref(),
+                Some(value)
+            );
+        }
     }
 
     #[test]
@@ -679,8 +682,8 @@ mod control_tests {
         require_tmux!();
         let server = TestServer::start("ctlnl");
 
-        let error = server
-            .control()
+        let control = server.control();
+        let error = control
             .command(&["set-option", "-g", "@probe", "line1\nline2"])
             .expect_err("a newline cannot be carried by the control transport");
 
@@ -690,7 +693,7 @@ mod control_tests {
         );
 
         // Refused before anything was written, so the connection still works.
-        assert!(server.control().available_sessions().is_ok());
+        assert!(control.available_sessions().is_ok());
     }
 
     #[test]
@@ -902,7 +905,7 @@ mod control_routing_tests {
             "-P",
             "-F",
             "#{pane_id}",
-            r"printf '\033[31mred\033[0m π %%end 1 2 3 BBB\nframed-done\n'; exec cat",
+            r"printf '\033[31mred\033[0m π\n%%end 1 2 3 BBB\nframed-done\n'; exec cat",
         ]);
         let pane_id = tmux_lib::pane_id::PaneId::from_str(
             String::from_utf8(output.stdout).unwrap().trim_end(),
@@ -926,7 +929,7 @@ mod control_routing_tests {
         let text = String::from_utf8_lossy(&forked);
         assert!(text.contains("\x1b[31mred"), "no escape in {text:?}");
         assert!(
-            text.contains("π %end 1 2 3 BBB"),
+            text.contains("π\n%end 1 2 3 BBB"),
             "no terminator in {text:?}"
         );
 

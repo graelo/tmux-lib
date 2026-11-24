@@ -21,7 +21,7 @@ use crate::{Result, error::Error};
 /// the newline and the remainder read as a command of its own. Refusing it is
 /// the only honest option on this transport; the caller's recourse is the
 /// spawning transport, which has no such limit.
-pub(crate) fn command_line(argv: &[&str]) -> Result<String> {
+pub(super) fn command_line(argv: &[&str]) -> Result<String> {
     let mut line = String::new();
 
     for argument in argv {

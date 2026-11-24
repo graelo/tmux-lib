@@ -15,18 +15,20 @@ This file contains instructions for coding agents working in this repository.
 
 ## Architecture
 
-- `src/client.rs`: client state and client-level tmux operations.
-- `src/server.rs`: server lifecycle and option management.
-- `src/session.rs`, `src/window.rs`, and `src/pane.rs`: public tmux resource
-  types, parsing, and operations.
-- `src/{session,window,pane}_id.rs`: strongly typed tmux identifiers and their
-  parsers.
-- `src/layout.rs`: parser for tmux window-layout strings.
-- `src/parse.rs`: shared parsers for tmux command output.
-- `src/error.rs`: public error type and command-output validation helpers.
-- `src/utils.rs`: helpers for tmux capture-buffer cleanup.
-- `tests/integration.rs`: end-to-end tests against a real tmux server; tests
-  clean up each session they create and skip when tmux is unavailable.
+- `src/tmux.rs`: the public `Tmux` handle and server socket address.
+- `src/ops/`: command arguments, transport selection, and reply handling.
+- `src/transport/`: run a command by spawning a client or reusing a control
+  connection. Both return a `Reply`.
+- `src/transport/control/`: `mod.rs` owns the child, reader thread, and
+  reconnect; `protocol.rs` reads reply blocks; `quoting.rs` writes command
+  lines. Notifications are discarded, not decoded.
+- `src/wire/`: build list formats and decode their records. User data uses
+  a byte length and raw bytes; newline separates records, not data fields.
+- `src/{client,session,window,pane}.rs`: resource types and field decoding.
+- `src/{session,window,pane}_id.rs`: typed tmux identifiers and their parsers.
+- `src/layout.rs`: window layout parsing, separate from reply framing.
+- `tests/integration.rs`: use private tmux servers and exercise both
+  transports. Tests skip when tmux is unavailable.
 
 ## Verification
 
