@@ -24,8 +24,8 @@ This file contains instructions for coding agents working in this repository.
   lines. Notifications are discarded, not decoded.
 - `src/wire/`: build list formats and decode their records. User data uses
   a byte length and raw bytes; newline separates records, not data fields.
-- `src/{client,session,window,pane}.rs`: resource types and field decoding.
-- `src/{session,window,pane}_id.rs`: typed tmux identifiers and their parsers.
+- `src/state/`: client, session, window, and pane types and field decoding.
+  Session, window, and pane IDs and parsers live alongside their types.
 - `src/layout.rs`: window layout parsing, separate from reply framing.
 - `tests/integration.rs`: use private tmux servers and exercise both
   transports. Tests skip when tmux is unavailable.

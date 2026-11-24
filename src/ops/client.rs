@@ -2,8 +2,8 @@
 
 use crate::{
     Result,
-    client::Client,
     error::{Error, map_byte_parse_error},
+    state::client::Client,
     tmux::Tmux,
     wire::{
         ByteParseError, RecordReader, decode_all, decode_one,

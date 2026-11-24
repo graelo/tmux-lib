@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Group resource types and IDs under `tmux_lib::state`. Existing import paths
+  still work.
+
 ### Changed
 
 - **Breaking:** require tmux 3.8 or later. Record formats now use raw

@@ -5,13 +5,12 @@ use nom::{Parser, character::complete::char, combinator::all_consuming};
 use crate::{
     Result,
     error::{map_add_intent, map_byte_parse_error},
-    pane::Pane,
-    pane_id::{PaneId, parse::pane_id},
-    session::Session,
-    session_id::{SessionId, parse::session_id},
+    state::{
+        pane::{Pane, PaneId, parse_pane_id},
+        session::{Session, SessionId, parse_session_id},
+        window::{Window, WindowId, parse_window_id},
+    },
     tmux::Tmux,
-    window::Window,
-    window_id::{WindowId, parse::window_id},
     wire::{
         decode_all,
         formats::{
@@ -76,10 +75,15 @@ impl Tmux {
         let buffer = String::from_utf8(output)?;
         let buffer = buffer.trim_end();
 
-        let (_, (new_session_id, _, new_window_id, _, new_pane_id)) =
-            all_consuming((session_id, char(':'), window_id, char(':'), pane_id))
-                .parse(buffer)
-                .map_err(|e| map_add_intent("new-session", NEW_SESSION_INTENT, e))?;
+        let (_, (new_session_id, _, new_window_id, _, new_pane_id)) = all_consuming((
+            parse_session_id,
+            char(':'),
+            parse_window_id,
+            char(':'),
+            parse_pane_id,
+        ))
+        .parse(buffer)
+        .map_err(|e| map_add_intent("new-session", NEW_SESSION_INTENT, e))?;
 
         Ok((new_session_id, new_window_id, new_pane_id))
     }

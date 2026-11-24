@@ -5,12 +5,12 @@ use nom::{Parser, character::complete::char, combinator::all_consuming};
 use crate::{
     Result,
     error::{map_add_intent, map_byte_parse_error},
-    pane::Pane,
-    pane_id::{PaneId, parse::pane_id},
-    session::Session,
+    state::{
+        pane::{Pane, PaneId, parse_pane_id},
+        session::Session,
+        window::{Window, WindowId, parse_window_id},
+    },
     tmux::Tmux,
-    window::Window,
-    window_id::{WindowId, parse::window_id},
     wire::{
         decode_all,
         formats::{
@@ -79,9 +79,10 @@ impl Tmux {
         let buffer = String::from_utf8(output)?;
         let buffer = buffer.trim_end();
 
-        let (_, (new_window_id, _, new_pane_id)) = all_consuming((window_id, char(':'), pane_id))
-            .parse(buffer)
-            .map_err(|e| map_add_intent("new-window", NEW_WINDOW_INTENT, e))?;
+        let (_, (new_window_id, _, new_pane_id)) =
+            all_consuming((parse_window_id, char(':'), parse_pane_id))
+                .parse(buffer)
+                .map_err(|e| map_add_intent("new-window", NEW_WINDOW_INTENT, e))?;
 
         Ok((new_window_id, new_pane_id))
     }
