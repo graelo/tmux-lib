@@ -16,7 +16,6 @@ use crate::{
         formats::{
             NEW_WINDOW_FORMAT, NEW_WINDOW_INTENT, WINDOW_FIELDS, WINDOW_FORMAT, WINDOW_INTENT,
         },
-        normalize_tmux_output,
     },
 };
 
@@ -26,9 +25,7 @@ impl Tmux {
         let output = self
             .run(&["list-windows", "-a", "-F", WINDOW_FORMAT.as_str()])?
             .output("list-windows")?;
-        let stdout = normalize_tmux_output(&output)
-            .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))?;
-        decode_all(&stdout, WINDOW_FIELDS, Window::decode)
+        decode_all(&output, WINDOW_FIELDS, Window::decode)
             .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))
     }
 

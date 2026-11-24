@@ -10,6 +10,9 @@ and this project adheres to
 
 ### Changed
 
+- **Breaking:** require tmux 3.8 or later. Record formats now use raw
+  length-prefixed data without the tmux 3.4–3.5 escape workaround. Linux CI
+  tests tmux 3.8 directly in the regular test jobs.
 - Switch CI from `dtolnay/rust-toolchain` to
   `actions-rust-lang/setup-rust-toolchain` (playbook v1.9)
 - Remove the `homepage` field from the manifest, redundant with `repository`

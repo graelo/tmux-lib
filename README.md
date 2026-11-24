@@ -7,7 +7,14 @@
 
 Read or manipulate tmux.
 
-Version requirements: _rustc 1.95.0+_ and _tmux 3.4+_
+## Compatibility
+
+| `tmux-lib`          | tmux   | Rust   |
+| ------------------- | ------ | ------ |
+| Next release (main) | 3.8+   | 1.95+  |
+| 0.7                 | 3.4+   | 1.95+  |
+
+Install the latest published release:
 
 ```toml
 [dependencies]
@@ -41,18 +48,18 @@ fn main() -> Result<()> {
 }
 ```
 
-The handle is `Send + Sync + Clone`, so it can be shared as-is or wrapped in
-an `Arc`. Its methods block; from an async caller, bridge with your runtime's
-blocking helper, such as `smol::unblock(move || tmux.available_panes())`.
+The handle is `Send + Sync + Clone`. Clones share the same control connection.
+Its methods block; from an async caller, bridge with your runtime's blocking
+helper, such as `smol::unblock(move || tmux.available_panes())`.
 
 ## Choosing a transport
 
 `Tmux::spawning()` forks a `tmux` client per command. It costs nothing to
 construct, cannot fail, attaches no client, and needs no session to exist.
 
-`Tmux::control()` keeps one `tmux -C` client attached and sends every command
-down it, so a command costs a round trip on an open pipe rather than a fork,
-an exec and a connect. It pays for itself over many commands, and it needs a
+`Tmux::control()` keeps one `tmux -C` client attached. A command on that
+connection costs a round trip on an open pipe rather than starting a new
+process. It pays for itself over many commands, and it needs a
 session to attach to:
 
 ```rust
@@ -72,6 +79,7 @@ threads take turns on it. Two consequences are worth knowing:
 - an attached control client is visible. It bumps `#{session_attached}` and
   fires the `client-attached` and `client-detached` hooks. Call
   `Tmux::disconnect` to release it;
+
 - while any control client is attached — this crate's, or another tool's —
   tmux resolves "the current client" to it for a caller that is not itself
   inside a tmux client. `current_client` and `current_client_name` report no

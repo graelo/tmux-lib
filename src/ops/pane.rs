@@ -13,7 +13,6 @@ use crate::{
     wire::{
         decode_all,
         formats::{NEW_PANE_FORMAT, PANE_FIELDS, PANE_FORMAT, PANE_INTENT},
-        normalize_tmux_output,
     },
 };
 
@@ -23,9 +22,7 @@ impl Tmux {
         let output = self
             .run(&["list-panes", "-a", "-F", PANE_FORMAT.as_str()])?
             .output("list-panes")?;
-        let stdout = normalize_tmux_output(&output)
-            .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))?;
-        decode_all(&stdout, PANE_FIELDS, Pane::decode)
+        decode_all(&output, PANE_FIELDS, Pane::decode)
             .map_err(|e| map_byte_parse_error("Pane", PANE_INTENT.as_str(), e))
     }
 

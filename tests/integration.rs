@@ -472,6 +472,42 @@ mod pane_tests {
     }
 
     #[test]
+    fn available_panes_reads_working_directories_as_raw_bytes() {
+        require_tmux!();
+
+        struct TestDir(std::path::PathBuf);
+        impl Drop for TestDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir(&self.0);
+            }
+        }
+
+        let name = format!("{}-π-\\n-\\037-\\x\n\x1f", unique_name("cwd"));
+        let path = std::env::temp_dir().canonicalize().unwrap().join(name);
+        std::fs::create_dir(&path).unwrap();
+        let dir = TestDir(path);
+
+        on_each_transport("pane-cwd", |server, tmux| {
+            assert!(
+                server
+                    .raw(&[
+                        "new-window",
+                        "-d",
+                        "-c",
+                        dir.0.to_str().unwrap(),
+                        "exec cat"
+                    ])
+                    .status
+                    .success()
+            );
+
+            let panes = tmux.available_panes().unwrap();
+            assert_eq!(panes.len(), 2);
+            assert!(panes.iter().any(|pane| pane.dirpath == dir.0), "{panes:?}");
+        });
+    }
+
+    #[test]
     fn new_pane_splits_the_window() {
         require_tmux!();
         on_each_transport("newpane", |server, tmux| {

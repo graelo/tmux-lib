@@ -50,11 +50,8 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-stable-hash-${{ hashFiles('Cargo.toml') }}
 
-      - name: Install tmux
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tmux
-          tmux -V
+      - name: Install tmux 3.8
+        run: bash ci/install-tmux.sh
 
       - name: Quality – cargo fmt
         run: |

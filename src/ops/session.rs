@@ -17,7 +17,6 @@ use crate::{
         formats::{
             NEW_SESSION_FORMAT, NEW_SESSION_INTENT, SESSION_FIELDS, SESSION_FORMAT, SESSION_INTENT,
         },
-        normalize_tmux_output,
     },
 };
 
@@ -27,9 +26,7 @@ impl Tmux {
         let output = self
             .run(&["list-sessions", "-F", SESSION_FORMAT.as_str()])?
             .output("list-sessions")?;
-        let stdout = normalize_tmux_output(&output)
-            .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))?;
-        decode_all(&stdout, SESSION_FIELDS, Session::decode)
+        decode_all(&output, SESSION_FIELDS, Session::decode)
             .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))
     }
 
