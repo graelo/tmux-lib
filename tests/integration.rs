@@ -472,6 +472,55 @@ mod pane_tests {
     }
 
     #[test]
+    fn available_panes_reads_working_directories_as_raw_bytes() {
+        require_tmux!();
+
+        struct TestDir(std::path::PathBuf);
+        impl Drop for TestDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir(&self.0);
+            }
+        }
+
+        let name = format!("{}-π-\\n-\\037-\\x\n\x1f", unique_name("cwd"));
+        let path = std::env::temp_dir().canonicalize().unwrap().join(name);
+        std::fs::create_dir(&path).unwrap();
+        let dir = TestDir(path);
+
+        on_each_transport("pane-cwd", |server, tmux| {
+            let output = server.raw(&[
+                "new-window",
+                "-d",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-c",
+                dir.0.to_str().unwrap(),
+                "exec cat",
+            ]);
+            assert!(output.status.success());
+            let id = String::from_utf8(output.stdout).unwrap();
+            let id = id.trim_end();
+
+            // tmux may report no working directory before the process starts.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let output =
+                    server.raw(&["display-message", "-p", "-t", id, "#{pane_current_command}"]);
+                if output.stdout == b"cat\n" {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "cat never started in pane {id}");
+                std::thread::sleep(Duration::from_millis(25));
+            }
+
+            let panes = tmux.available_panes().unwrap();
+            let pane = panes.iter().find(|pane| pane.id.as_str() == id).unwrap();
+            assert_eq!(pane.dirpath, dir.0);
+        });
+    }
+
+    #[test]
     fn new_pane_splits_the_window() {
         require_tmux!();
         on_each_transport("newpane", |server, tmux| {
@@ -620,22 +669,25 @@ mod control_tests {
         let server = TestServer::start("ctlquote");
         let control = server.control();
 
-        let value = r#"it's "two words" \ and ; a #{format}"#;
-        control
-            .command(&["set-option", "-g", "@probe", value])
-            .unwrap();
+        for value in [
+            r#"it's "two words" \ and ; a #{format}"#,
+            r"ends with \",
+            "$HOME # π café",
+        ] {
+            control
+                .command(&["set-option", "-g", "@probe", value])
+                .unwrap();
 
-        // Read back over the spawning transport, where the argument never met
-        // the control-mode lexer, so a difference can only have come from the
-        // write.
-        assert_eq!(
-            server
-                .tmux()
-                .show_option("@probe", true)
-                .unwrap()
-                .as_deref(),
-            Some(value)
-        );
+            // A spawned client reads back exactly what tmux stored.
+            assert_eq!(
+                server
+                    .tmux()
+                    .show_option("@probe", true)
+                    .unwrap()
+                    .as_deref(),
+                Some(value)
+            );
+        }
     }
 
     #[test]
@@ -643,8 +695,8 @@ mod control_tests {
         require_tmux!();
         let server = TestServer::start("ctlnl");
 
-        let error = server
-            .control()
+        let control = server.control();
+        let error = control
             .command(&["set-option", "-g", "@probe", "line1\nline2"])
             .expect_err("a newline cannot be carried by the control transport");
 
@@ -654,7 +706,7 @@ mod control_tests {
         );
 
         // Refused before anything was written, so the connection still works.
-        assert!(server.control().available_sessions().is_ok());
+        assert!(control.available_sessions().is_ok());
     }
 
     #[test]
@@ -866,7 +918,7 @@ mod control_routing_tests {
             "-P",
             "-F",
             "#{pane_id}",
-            r"printf '\033[31mred\033[0m π %%end 1 2 3 BBB\nframed-done\n'; exec cat",
+            r"printf '\033[31mred\033[0m π\n%%end 1 2 3 BBB\nframed-done\n'; exec cat",
         ]);
         let pane_id = tmux_lib::pane_id::PaneId::from_str(
             String::from_utf8(output.stdout).unwrap().trim_end(),
@@ -890,7 +942,7 @@ mod control_routing_tests {
         let text = String::from_utf8_lossy(&forked);
         assert!(text.contains("\x1b[31mred"), "no escape in {text:?}");
         assert!(
-            text.contains("π %end 1 2 3 BBB"),
+            text.contains("π\n%end 1 2 3 BBB"),
             "no terminator in {text:?}"
         );
 

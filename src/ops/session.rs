@@ -5,19 +5,17 @@ use nom::{Parser, character::complete::char, combinator::all_consuming};
 use crate::{
     Result,
     error::{map_add_intent, map_byte_parse_error},
-    pane::Pane,
-    pane_id::{PaneId, parse::pane_id},
-    session::Session,
-    session_id::{SessionId, parse::session_id},
+    state::{
+        pane::{Pane, PaneId, parse_pane_id},
+        session::{Session, SessionId, parse_session_id},
+        window::{Window, WindowId, parse_window_id},
+    },
     tmux::Tmux,
-    window::Window,
-    window_id::{WindowId, parse::window_id},
     wire::{
         decode_all,
         formats::{
             NEW_SESSION_FORMAT, NEW_SESSION_INTENT, SESSION_FIELDS, SESSION_FORMAT, SESSION_INTENT,
         },
-        normalize_tmux_output,
     },
 };
 
@@ -27,9 +25,7 @@ impl Tmux {
         let output = self
             .run(&["list-sessions", "-F", SESSION_FORMAT.as_str()])?
             .output("list-sessions")?;
-        let stdout = normalize_tmux_output(&output)
-            .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))?;
-        decode_all(&stdout, SESSION_FIELDS, Session::decode)
+        decode_all(&output, SESSION_FIELDS, Session::decode)
             .map_err(|e| map_byte_parse_error("Session", SESSION_INTENT.as_str(), e))
     }
 
@@ -79,10 +75,15 @@ impl Tmux {
         let buffer = String::from_utf8(output)?;
         let buffer = buffer.trim_end();
 
-        let (_, (new_session_id, _, new_window_id, _, new_pane_id)) =
-            all_consuming((session_id, char(':'), window_id, char(':'), pane_id))
-                .parse(buffer)
-                .map_err(|e| map_add_intent("new-session", NEW_SESSION_INTENT, e))?;
+        let (_, (new_session_id, _, new_window_id, _, new_pane_id)) = all_consuming((
+            parse_session_id,
+            char(':'),
+            parse_window_id,
+            char(':'),
+            parse_pane_id,
+        ))
+        .parse(buffer)
+        .map_err(|e| map_add_intent("new-session", NEW_SESSION_INTENT, e))?;
 
         Ok((new_session_id, new_window_id, new_pane_id))
     }

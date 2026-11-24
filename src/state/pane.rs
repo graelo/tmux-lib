@@ -1,14 +1,17 @@
-//! This module provides a few types and functions to handle Tmux Panes.
-//!
-//! The main use cases are running Tmux commands & parsing Tmux panes
-//! information.
+//! Tmux pane state and identifiers.
 
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf, str::FromStr};
 
+use nom::{
+    IResult, Parser,
+    character::complete::{char, digit1},
+    combinator::all_consuming,
+    sequence::preceded,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    pane_id::PaneId,
+    error::{Error, map_add_intent},
     wire::{ByteParseError, RecordReader},
 };
 
@@ -34,7 +37,7 @@ pub struct Pane {
 
 impl Pane {
     /// Build a `Pane` from one framed record, reading the fields declared in
-    /// [`PANE_FIELDS`].
+    /// [`PANE_FIELDS`](crate::wire::formats::PANE_FIELDS).
     pub(crate) fn decode(
         reader: &mut RecordReader<'_, '_>,
     ) -> std::result::Result<Pane, ByteParseError> {
@@ -60,6 +63,66 @@ impl Pane {
             command,
         })
     }
+}
+
+/// The id of a Tmux pane.
+///
+/// This wraps the raw tmux representation (`%12`).
+///
+/// ```
+/// use std::str::FromStr;
+/// use tmux_lib::pane_id::PaneId;
+///
+/// let id = PaneId::from_str("%42").unwrap();
+/// assert_eq!(id.as_str(), "%42");
+///
+/// // Can also be created from a u16
+/// let id = PaneId::from(&7u16);
+/// assert_eq!(id.as_str(), "%7");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PaneId(pub String);
+
+impl FromStr for PaneId {
+    type Err = Error;
+
+    /// Parse into `PaneId`. The `&str` must start with '%' followed by a `u32`.
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let desc = "PaneId";
+        let intent = "##{pane_id}";
+
+        let (_, pane_id) = all_consuming(parse_pane_id)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
+
+        Ok(pane_id)
+    }
+}
+
+impl From<&u16> for PaneId {
+    fn from(value: &u16) -> Self {
+        Self(format!("%{value}"))
+    }
+}
+
+impl PaneId {
+    /// Extract a string slice containing the raw representation.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for PaneId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+pub(crate) fn parse_pane_id(input: &str) -> IResult<&str, PaneId> {
+    let (input, digit) = preceded(char('%'), digit1).parse(input)?;
+    let id = format!("%{digit}");
+    Ok((input, PaneId(id)))
 }
 
 #[cfg(test)]
@@ -393,5 +456,98 @@ mod tests {
 
         let overflowing = b"%1\x1f0\x1ffalse\x1f184467440737095516160\x1ftitle\n";
         assert!(parse_all(overflowing).is_err());
+    }
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_pane_id_fn() {
+        let actual = parse_pane_id("%43");
+        let expected = Ok(("", PaneId("%43".into())));
+        assert_eq!(actual, expected);
+
+        let actual = parse_pane_id("%4");
+        let expected = Ok(("", PaneId("%4".into())));
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_parse_pane_id_struct() {
+        let actual = PaneId::from_str("%43");
+        assert!(actual.is_ok());
+        assert_eq!(actual.unwrap(), PaneId("%43".into()));
+
+        let actual = PaneId::from_str("4:38");
+        assert!(matches!(
+            actual,
+            Err(Error::ParseError {
+                desc: "PaneId",
+                intent: "##{pane_id}",
+                message: _
+            })
+        ));
+    }
+
+    #[test]
+    fn test_parse_pane_id_with_large_number() {
+        let pane_id = PaneId::from_str("%99999").unwrap();
+        assert_eq!(pane_id.as_str(), "%99999");
+    }
+
+    #[test]
+    fn test_parse_pane_id_fails_on_wrong_prefix() {
+        // @ is for window, $ is for session
+        assert!(PaneId::from_str("@1").is_err());
+        assert!(PaneId::from_str("$1").is_err());
+    }
+
+    #[test]
+    fn test_parse_pane_id_fails_on_no_prefix() {
+        assert!(PaneId::from_str("123").is_err());
+    }
+
+    #[test]
+    fn test_parse_pane_id_fails_on_empty() {
+        assert!(PaneId::from_str("").is_err());
+        assert!(PaneId::from_str("%").is_err());
+    }
+
+    #[test]
+    fn test_parse_pane_id_fails_on_non_numeric() {
+        assert!(PaneId::from_str("%abc").is_err());
+        assert!(PaneId::from_str("%12abc").is_err());
+    }
+
+    #[test]
+    fn test_parse_pane_id_fails_on_extra_content() {
+        // all_consuming should reject trailing content
+        assert!(PaneId::from_str("%12:extra").is_err());
+    }
+
+    #[test]
+    fn test_pane_id_as_str() {
+        let pane_id = PaneId::from_str("%42").unwrap();
+        assert_eq!(pane_id.as_str(), "%42");
+    }
+
+    #[test]
+    fn test_pane_id_display() {
+        let pane_id = PaneId::from_str("%42").unwrap();
+        assert_eq!(format!("{}", pane_id), "%42");
+    }
+
+    #[test]
+    fn test_pane_id_from_u16() {
+        let pane_id = PaneId::from(&42u16);
+        assert_eq!(pane_id.as_str(), "%42");
+    }
+
+    #[test]
+    fn test_pane_id_from_u16_zero() {
+        let pane_id = PaneId::from(&0u16);
+        assert_eq!(pane_id.as_str(), "%0");
     }
 }

@@ -124,11 +124,8 @@ fn only_the_transport_starts_a_tmux_process() {
 
 #[test]
 fn only_the_wire_module_spells_the_framed_protocol() {
-    // The framed record protocol, specifically: the separator byte, the byte
-    // length prefix, and the backslash-doubling substitution. A plain
-    // `#{pane_title}` in a shell example is a tmux format, not this crate's
-    // framing, and is not what this guards.
-    for needle in ["\\x1f", "#{n:", "#{s|"] {
+    // The separator byte and the byte length prefix belong to record framing.
+    for needle in ["\\x1f", "#{n:"] {
         let offenders = offenders(needle, "src/wire");
 
         assert!(

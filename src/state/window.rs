@@ -1,16 +1,22 @@
-//! This module provides a few types and functions to handle Tmux windows.
-//!
-//! The main use cases are running Tmux commands & parsing Tmux window information.
+//! Tmux window state and identifiers.
 
-use nom::{Parser, combinator::all_consuming};
+use std::str::FromStr;
+
+use nom::{
+    IResult, Parser,
+    character::complete::{char, digit1},
+    combinator::all_consuming,
+    sequence::preceded,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    error::{Error, map_add_intent},
     layout::{self, window_layout},
-    pane_id::PaneId,
-    window_id::WindowId,
     wire::{ByteParseError, RecordReader},
 };
+
+use super::pane::PaneId;
 
 /// A Tmux window.
 ///
@@ -42,7 +48,7 @@ impl Window {
 
 impl Window {
     /// Build a `Window` from one framed record, reading the fields declared in
-    /// [`WINDOW_FIELDS`].
+    /// [`WINDOW_FIELDS`](crate::wire::formats::WINDOW_FIELDS).
     pub(crate) fn decode(
         reader: &mut RecordReader<'_, '_>,
     ) -> std::result::Result<Window, ByteParseError> {
@@ -73,6 +79,51 @@ impl Window {
     }
 }
 
+/// The id of a Tmux window.
+///
+/// This wraps the raw tmux representation (`@41`).
+///
+/// ```
+/// use std::str::FromStr;
+/// use tmux_lib::window_id::WindowId;
+///
+/// let id = WindowId::from_str("@10").unwrap();
+/// assert_eq!(id.as_str(), "@10");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowId(String);
+
+impl FromStr for WindowId {
+    type Err = Error;
+
+    /// Parse into WindowId. The `&str` must start with '@' followed by a
+    /// `u16`.
+    fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
+        let desc = "WindowId";
+        let intent = "##{window_id}";
+
+        let (_, window_id) = all_consuming(parse_window_id)
+            .parse(input)
+            .map_err(|e| map_add_intent(desc, intent, e))?;
+
+        Ok(window_id)
+    }
+}
+
+impl WindowId {
+    /// Extract a string slice containing the raw representation.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+pub(crate) fn parse_window_id(input: &str) -> IResult<&str, WindowId> {
+    let (input, digit) = preceded(char('@'), digit1).parse(input)?;
+    let id = format!("@{digit}");
+    Ok((input, WindowId(id)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::Window;
@@ -90,8 +141,8 @@ mod tests {
         decode_one(input.as_bytes(), WINDOW_FIELDS, Window::decode)
             .map_err(|e| crate::error::map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))
     }
+    use super::PaneId;
     use crate::Result;
-    use crate::pane_id::PaneId;
     use std::str::FromStr;
 
     #[test]
@@ -363,5 +414,94 @@ mod tests {
         let invalid_length =
             b"@5\x1f0\x1ftrue\x1f64f0,334x85,0,0,11\x1fnot-a-number\x1fname\x1f7\x1fsession\n";
         assert!(parse_all(invalid_length).is_err());
+    }
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_window_id_fn() {
+        let actual = parse_window_id("@43");
+        let expected = Ok(("", WindowId("@43".into())));
+        assert_eq!(actual, expected);
+
+        let actual = parse_window_id("@4");
+        let expected = Ok(("", WindowId("@4".into())));
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_parse_window_id_struct() {
+        let actual = WindowId::from_str("@43");
+        assert!(actual.is_ok());
+        assert_eq!(actual.unwrap(), WindowId("@43".into()));
+
+        let actual = WindowId::from_str("4:38");
+        assert!(matches!(
+            actual,
+            Err(Error::ParseError {
+                desc: "WindowId",
+                intent: "##{window_id}",
+                message: _
+            })
+        ));
+    }
+
+    #[test]
+    fn test_parse_window_id_with_large_number() {
+        let window_id = WindowId::from_str("@99999").unwrap();
+        assert_eq!(window_id.as_str(), "@99999");
+    }
+
+    #[test]
+    fn test_parse_window_id_zero() {
+        let window_id = WindowId::from_str("@0").unwrap();
+        assert_eq!(window_id.as_str(), "@0");
+    }
+
+    #[test]
+    fn test_parse_window_id_fails_on_wrong_prefix() {
+        // $ is for session, % is for pane
+        assert!(WindowId::from_str("$1").is_err());
+        assert!(WindowId::from_str("%1").is_err());
+    }
+
+    #[test]
+    fn test_parse_window_id_fails_on_no_prefix() {
+        assert!(WindowId::from_str("123").is_err());
+    }
+
+    #[test]
+    fn test_parse_window_id_fails_on_empty() {
+        assert!(WindowId::from_str("").is_err());
+        assert!(WindowId::from_str("@").is_err());
+    }
+
+    #[test]
+    fn test_parse_window_id_fails_on_non_numeric() {
+        assert!(WindowId::from_str("@abc").is_err());
+        assert!(WindowId::from_str("@12abc").is_err());
+    }
+
+    #[test]
+    fn test_parse_window_id_fails_on_extra_content() {
+        // all_consuming should reject trailing content
+        assert!(WindowId::from_str("@12:extra").is_err());
+    }
+
+    #[test]
+    fn test_window_id_as_str() {
+        let window_id = WindowId::from_str("@42").unwrap();
+        assert_eq!(window_id.as_str(), "@42");
+    }
+
+    #[test]
+    fn test_window_id_leaves_remaining_in_parser() {
+        // The parse function (not FromStr) should leave remaining input
+        let (remaining, window_id) = parse_window_id("@42:rest").unwrap();
+        assert_eq!(remaining, ":rest");
+        assert_eq!(window_id, WindowId("@42".into()));
     }
 }

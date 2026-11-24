@@ -55,9 +55,8 @@ impl Server {
 /// construct, cannot fail, attaches no client, and needs no session to exist.
 /// A program that runs a handful of commands and exits should use it.
 ///
-/// [`Tmux::control`] keeps one client attached and sends every command down
-/// it, so a command costs a round trip on an open pipe rather than a fork, an
-/// exec and a connect. It pays for itself over many commands. It needs a
+/// [`Tmux::control`] keeps one client attached and reuses it for most
+/// commands, avoiding a process launch each time. It needs a
 /// session to attach to, and the attached client is visible to the user: it
 /// bumps `#{session_attached}` and fires the `client-attached` and
 /// `client-detached` hooks.
@@ -144,10 +143,10 @@ impl Tmux {
     ///
     /// # Note
     ///
-    /// The exact bytes are what this transport observed on stdout. A future
-    /// transport may frame command output differently — notably in how a
-    /// trailing newline is reported — so do not depend on byte-identical
-    /// output across transports.
+    /// Control-mode replies are line-framed and may add a trailing newline.
+    /// Use a spawning handle for arbitrary output that might contain a line
+    /// identical to a reply terminator. For pane contents, prefer
+    /// [`Self::capture_pane`], which checks the length on control handles.
     pub fn command(&self, argv: &[&str]) -> Result<Vec<u8>> {
         self.run(argv)?.output("command")
     }

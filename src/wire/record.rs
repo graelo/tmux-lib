@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn decodes_a_pane_record() {
-        use crate::pane::Pane;
+        use crate::state::pane::Pane;
         use crate::wire::formats::PANE_FIELDS;
 
         let record = b"%20\x1f0\x1ffalse\x1f4\x1frmbp\x1f4\x1fnvim\x1f35\x1f/Users/graelo/code/rust/tmux-backup\n";
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn decodes_a_window_record() {
-        use crate::window::Window;
+        use crate::state::window::Window;
         use crate::wire::formats::WINDOW_FIELDS;
 
         let record = b"@5\x1f0\x1ftrue\x1f64f0,334x85,0,0,11\x1f3\x1fben\x1f4\x1frust\n";
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn decodes_a_session_record() {
-        use crate::session::Session;
+        use crate::state::session::Session;
         use crate::wire::formats::SESSION_FIELDS;
 
         let record = b"$1\x1f7\x1fpytorch\x1f24\x1f/Users/graelo/ml/pytorch\n";

@@ -32,18 +32,11 @@ impl Field {
         match self {
             Field::Token(name) => format!("#{{{name}}}"),
             Field::Flag(name) => format!("#{{?{name},true,false}}"),
-            // `#{n:...}` is the byte length. The `#{s|...|...|:...}`
-            // substitution doubles every literal backslash in the value,
-            // because tmux 3.4 and 3.5 escape command output with
-            // `VIS_NOSLASH`, which leaves backslashes untouched and would
-            // otherwise make the escaping ambiguous. See
-            // `super::framing::normalize_tmux_output`.
-            Field::Data(name) => {
-                format!(
-                    "#{{n:{name}}}{SEP}#{{s|\\\\|\\\\\\\\|:{name}}}",
-                    SEP = FIELD_SEPARATOR as char
-                )
-            }
+            // `n:` gives the byte length, not the character count.
+            Field::Data(name) => format!(
+                "#{{n:{name}}}{SEP}#{{{name}}}",
+                SEP = FIELD_SEPARATOR as char
+            ),
         }
     }
 }
@@ -86,30 +79,24 @@ mod tests {
     }
 
     #[test]
-    fn data_renders_as_a_length_prefix_and_a_backslash_doubling_value() {
+    fn data_renders_as_a_byte_length_and_a_raw_value() {
         assert_eq!(
             Field::Data("pane_title").format(),
-            "#{n:pane_title}\x1f#{s|\\\\|\\\\\\\\|:pane_title}"
+            "#{n:pane_title}\x1f#{pane_title}"
         );
     }
 
     #[test]
-    fn format_joins_fields_with_the_separator() {
+    fn format_and_intent_share_the_same_field_order() {
         let fields = [Field::Token("session_id"), Field::Data("session_name")];
 
         assert_eq!(
             format_of(&fields),
-            "#{session_id}\x1f#{n:session_name}\x1f#{s|\\\\|\\\\\\\\|:session_name}"
+            "#{session_id}\x1f#{n:session_name}\x1f#{session_name}"
         );
-    }
-
-    #[test]
-    fn intent_spells_out_the_separators_and_the_terminator() {
-        let fields = [Field::Token("session_id"), Field::Data("session_name")];
-
         assert_eq!(
             intent_of(&fields),
-            "#{session_id}\\x1f#{n:session_name}\\x1f#{s|\\\\|\\\\\\\\|:session_name}\\n"
+            "#{session_id}\\x1f#{n:session_name}\\x1f#{session_name}\\n"
         );
     }
 }

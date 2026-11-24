@@ -1,18 +1,12 @@
-//! The long-lived `tmux -C` control connection.
+//! Run commands over one attached `tmux -C` client.
 //!
-//! One attached client handles every command, so a command costs a round trip
-//! on an open pipe rather than a fork, an exec and a connect.
-//!
-//! Split so that the parts with no I/O can be tested without a tmux:
-//! [`protocol`] turns a stream of lines into command replies and
-//! notifications, and [`quoting`] turns an argument vector into the single
-//! line the control connection accepts. What is left here is the process, the
-//! reader thread, and the reconnect.
+//! The reader thread drains stdout even when no command is waiting.
+//! `protocol` reads replies; `quoting` renders command arguments.
 
-pub(crate) mod protocol;
-pub(crate) mod quoting;
+mod protocol;
+mod quoting;
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -25,7 +19,7 @@ use crate::{
     transport::{Reply, Spawning, address},
 };
 
-use protocol::{Demux, Event};
+use protocol::{Block, Frame, read_frame};
 
 /// Talks to tmux over one attached control client.
 ///
@@ -160,7 +154,7 @@ struct Live {
     /// leaving the pipe unread costs nothing; command errors arrive on stdout
     /// as `%error` blocks.
     stderr: Option<ChildStderr>,
-    events: Receiver<Event>,
+    frames: Receiver<io::Result<Frame>>,
 }
 
 impl Live {
@@ -170,9 +164,8 @@ impl Live {
             // `no-output` stops the flood: an attached control client is sent
             // every byte of every pane otherwise. `ignore-size` keeps our
             // client, which reports no size, from resizing the user's windows.
-            // `new-layouts` makes tmux 3.8 report layouts in the format every
-            // other client gets, rather than an older one that leaves floating
-            // panes out; earlier versions ignore a flag they do not know.
+            // `new-layouts` gives us the same layout format as a spawned
+            // client, including floating panes.
             .args(["-C", "attach", "-f", "no-output,ignore-size,new-layouts"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -183,32 +176,26 @@ impl Live {
         let stdout = child.stdout.take().expect("stdout was piped");
         let stderr = child.stderr.take().expect("stderr was piped");
 
-        let (sender, events) = channel();
-        thread::spawn(move || read_events(stdout, &sender));
+        let (sender, frames) = channel();
+        thread::spawn(move || read_frames(stdout, &sender));
 
         let mut live = Live {
             child,
             stdin: Some(stdin),
             stderr: Some(stderr),
-            events,
+            frames,
         };
 
-        // The attach performs a command of its own, and its block is the only
-        // one carrying flags `0`. Consuming it here is what keeps it from
-        // being handed to the first caller as their reply.
-        //
-        // It is also where a refused attach is reported: with no session to
-        // attach to, that block is terminated by `%error` and its body is
-        // tmux's `no sessions`. Accepting any flags-`0` block would hand back
-        // a handle whose every command fails.
-        match live.events.recv() {
-            Ok(Event::Block(block)) if block.flags == 0 && !block.failed => Ok(live),
-            Ok(Event::Block(block)) if block.flags == 0 => Err(Error::ControlAttachFailed {
+        // Consume the attach reply (flags 0) before sending any commands.
+        match live.recv_block() {
+            Ok(block) if block.flags == 0 && !block.failed => Ok(live),
+            Ok(block) if block.flags == 0 => Err(Error::ControlAttachFailed {
                 message: String::from_utf8_lossy(&block.body).trim_end().to_owned(),
             }),
-            Ok(_) | Err(_) => Err(Error::ControlAttachFailed {
-                message: live.final_words(),
+            Ok(_) => Err(Error::ControlAttachFailed {
+                message: "expected the initial attach reply".to_owned(),
             }),
+            Err(message) => Err(Error::ControlAttachFailed { message }),
         }
     }
 
@@ -217,34 +204,26 @@ impl Live {
             .stdin
             .as_mut()
             .expect("stdin is taken only while dropping");
-
         stdin.write_all(line.as_bytes())?;
         stdin.write_all(b"\n")?;
         stdin.flush()?;
 
-        loop {
-            match self.events.recv() {
-                Ok(Event::Block(block)) => {
-                    return Ok(if block.failed {
-                        Reply::failure(block.body)
-                    } else {
-                        Reply::success(block.body)
-                    });
-                }
-                // The reader drops these, but the channel carries the type.
-                Ok(Event::Notification(_)) => continue,
-                Ok(Event::Exit(reason)) => {
-                    let reason = reason.unwrap_or_else(|| self.final_words());
-                    return Err(Error::ControlDisconnected { reason });
-                }
-                // The reader is gone, so tmux closed stdout without saying
-                // why. Whatever it wrote on the way out is the best answer.
-                Err(_) => {
-                    return Err(Error::ControlDisconnected {
-                        reason: self.final_words(),
-                    });
-                }
-            }
+        let block = self
+            .recv_block()
+            .map_err(|reason| Error::ControlDisconnected { reason })?;
+        Ok(if block.failed {
+            Reply::failure(block.body)
+        } else {
+            Reply::success(block.body)
+        })
+    }
+
+    fn recv_block(&mut self) -> std::result::Result<Block, String> {
+        match self.frames.recv() {
+            Ok(Ok(Frame::Reply(block))) => Ok(block),
+            Ok(Ok(Frame::Exit(Some(reason)))) => Err(reason),
+            Ok(Err(error)) => Err(error.to_string()),
+            Ok(Ok(Frame::Exit(None))) | Err(_) => Err(self.final_words()),
         }
     }
 
@@ -272,34 +251,24 @@ impl Drop for Live {
     }
 }
 
-/// Read the control stream until it ends, forwarding what callers wait on.
-///
-/// Notifications are dropped rather than queued. The reader has to recognise
-/// them either way, to know they are not part of a reply; queueing them would
-/// grow without bound between commands, and nothing exposes them yet.
-fn read_events(stdout: ChildStdout, events: &Sender<Event>) {
+/// Forward only replies, exit, and read failures; notifications are discarded
+/// by the protocol reader without allocating an event for each one.
+fn read_frames(stdout: ChildStdout, frames: &Sender<io::Result<Frame>>) {
     let mut reader = BufReader::new(stdout);
-    let mut demux = Demux::new();
     let mut line = Vec::new();
 
     loop {
-        line.clear();
-        match reader.read_until(b'\n', &mut line) {
-            Ok(0) | Err(_) => return,
-            Ok(_) => {}
-        }
-        if line.last() == Some(&b'\n') {
-            line.pop();
-        }
-
-        let Some(event) = demux.line(&line) else {
-            continue;
-        };
-        if matches!(event, Event::Notification(_)) {
-            continue;
-        }
-        if events.send(event).is_err() {
-            return;
+        match read_frame(&mut reader, &mut line) {
+            Ok(Some(frame)) => {
+                if frames.send(Ok(frame)).is_err() {
+                    return;
+                }
+            }
+            Ok(None) => return,
+            Err(error) => {
+                let _ = frames.send(Err(error));
+                return;
+            }
         }
     }
 }

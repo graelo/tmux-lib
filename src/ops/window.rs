@@ -5,18 +5,17 @@ use nom::{Parser, character::complete::char, combinator::all_consuming};
 use crate::{
     Result,
     error::{map_add_intent, map_byte_parse_error},
-    pane::Pane,
-    pane_id::{PaneId, parse::pane_id},
-    session::Session,
+    state::{
+        pane::{Pane, PaneId, parse_pane_id},
+        session::Session,
+        window::{Window, WindowId, parse_window_id},
+    },
     tmux::Tmux,
-    window::Window,
-    window_id::{WindowId, parse::window_id},
     wire::{
         decode_all,
         formats::{
             NEW_WINDOW_FORMAT, NEW_WINDOW_INTENT, WINDOW_FIELDS, WINDOW_FORMAT, WINDOW_INTENT,
         },
-        normalize_tmux_output,
     },
 };
 
@@ -26,9 +25,7 @@ impl Tmux {
         let output = self
             .run(&["list-windows", "-a", "-F", WINDOW_FORMAT.as_str()])?
             .output("list-windows")?;
-        let stdout = normalize_tmux_output(&output)
-            .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))?;
-        decode_all(&stdout, WINDOW_FIELDS, Window::decode)
+        decode_all(&output, WINDOW_FIELDS, Window::decode)
             .map_err(|e| map_byte_parse_error("Window", WINDOW_INTENT.as_str(), e))
     }
 
@@ -82,9 +79,10 @@ impl Tmux {
         let buffer = String::from_utf8(output)?;
         let buffer = buffer.trim_end();
 
-        let (_, (new_window_id, _, new_pane_id)) = all_consuming((window_id, char(':'), pane_id))
-            .parse(buffer)
-            .map_err(|e| map_add_intent("new-window", NEW_WINDOW_INTENT, e))?;
+        let (_, (new_window_id, _, new_pane_id)) =
+            all_consuming((parse_window_id, char(':'), parse_pane_id))
+                .parse(buffer)
+                .map_err(|e| map_add_intent("new-window", NEW_WINDOW_INTENT, e))?;
 
         Ok((new_window_id, new_pane_id))
     }

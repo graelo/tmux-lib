@@ -2,8 +2,8 @@
 
 use crate::{
     Result,
-    client::Client,
     error::{Error, map_byte_parse_error},
+    state::client::Client,
     tmux::Tmux,
     wire::{
         ByteParseError, RecordReader, decode_all, decode_one,
@@ -11,7 +11,6 @@ use crate::{
             CLIENT_FIELDS, CLIENT_FORMAT, CLIENT_INTENT, CLIENT_LIST_FIELDS, CLIENT_LIST_FORMAT,
             CLIENT_LIST_INTENT,
         },
-        normalize_tmux_output,
     },
 };
 
@@ -71,7 +70,7 @@ impl Tmux {
         let output = self
             .run_spawned(&["display-message", "-p", "-F", CLIENT_FORMAT.as_str()])?
             .output("display-message")?;
-        let client = self.decode_client(&output)?;
+        let client = decode_client(&output)?;
 
         Ok((!client.session_name.is_empty()).then_some(client))
     }
@@ -116,14 +115,7 @@ impl Tmux {
             ])?
             .output("display-message")?;
 
-        self.decode_client(&output)
-    }
-
-    fn decode_client(&self, output: &[u8]) -> Result<Client> {
-        let stdout = normalize_tmux_output(output)
-            .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))?;
-        decode_one(&stdout, CLIENT_FIELDS, Client::decode)
-            .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))
+        decode_client(&output)
     }
 
     /// Return the name of the client issuing this command, such as
@@ -172,9 +164,7 @@ impl Tmux {
             .run(&["list-clients", "-F", CLIENT_LIST_FORMAT.as_str()])?
             .output("list-clients")?;
 
-        let stdout = normalize_tmux_output(&output)
-            .map_err(|e| map_byte_parse_error("Client", CLIENT_LIST_INTENT.as_str(), e))?;
-        let clients = decode_all(&stdout, CLIENT_LIST_FIELDS, ClientActivity::decode)
+        let clients = decode_all(&output, CLIENT_LIST_FIELDS, ClientActivity::decode)
             .map_err(|e| map_byte_parse_error("Client", CLIENT_LIST_INTENT.as_str(), e))?;
 
         Ok(most_recent(clients))
@@ -225,6 +215,11 @@ impl Tmux {
         self.run_spawned(&["switch-client", "-t", &exact_session_name])?
             .no_output("switch-client")
     }
+}
+
+fn decode_client(output: &[u8]) -> Result<Client> {
+    decode_one(output, CLIENT_FIELDS, Client::decode)
+        .map_err(|e| map_byte_parse_error("Client", CLIENT_INTENT.as_str(), e))
 }
 
 /// Pick the name of the client that was active most recently.
