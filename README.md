@@ -101,6 +101,9 @@ threads take turns on it. Two consequences are worth knowing:
 
 ## Development
 
+See [Architecture](ARCHITECTURE.md) for the command path, reply formats, and
+where they live in the source.
+
 For local verification, read the [`Makefile`](Makefile) for the canonical task
 definitions, or run `make help` to list them: run `make check` before pushing
 and `make check-all` before opening a pull request.
